@@ -15,6 +15,7 @@
     "react-native-screens": "^4.26.2"
   },
   "devDependencies": {
+    "@expo/ngrok": "npm:expo-cloudflared@^4.2.1",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },
