@@ -30,6 +30,9 @@
           "isAccessMediaLocationEnabled": false
         }
       ]
-    ]
+    ],
+    "experiments": {
+      "baseUrl": "/Memo-Me"
+    }
   }
 }

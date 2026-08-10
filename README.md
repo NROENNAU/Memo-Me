@@ -31,6 +31,18 @@ types/        Gemeinsame TypeScript-Datentypen
 db/           SQLite-Datenbankschema und -Initialisierung
 ```
 
+## Web-Version zum Testen
+
+Die App läuft aktuell **zusätzlich als Web-App** und ist über GitHub Pages von
+jedem internetfähigen Gerät aus testbar, ohne Installation:
+
+**https://nroennau.github.io/Memo-Me/**
+
+Jeder Push auf diesen Branch baut die Web-Version automatisch neu (siehe
+`.github/workflows/deploy-web.yml`). Die Web-Version speichert ihre Daten
+lokal im Browser (nicht in der SQLite-Datenbank) – Web- und Handy-Version
+teilen sich aktuell noch keine Daten.
+
 ## Setup & Ausführen
 
 Voraussetzung: [Node.js](https://nodejs.org/) ist installiert.
@@ -44,10 +56,14 @@ Danach öffnet sich ein QR-Code im Terminal/Browser. Auf dem eigenen Smartphone
 die **Expo Go**-App installieren (App Store / Play Store) und den QR-Code
 scannen – die App startet direkt auf dem Handy.
 
+Für die Web-Version lokal: `npx expo start --web`.
+
 ## Aktueller Stand
 
 - ✅ Expo-TypeScript-Projekt mit sauberer Ordnerstruktur
-- ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`)
+- ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`) – nativ
+- ✅ Web-Version über `react-native-web`, Datenhaltung dort über den Browser-Speicher
+- ✅ Automatisches Deployment der Web-Version auf GitHub Pages
 - ✅ Grundgerüst für die Foto-Berechtigungsabfrage (iOS & Android)
 - ✅ Platzhalter-Bildschirm `PhotoSwipeScreen` mit persistenter Aktionsleiste (`ActionBar`) am unteren Rand
 - ✅ Navigation zwischen Screens eingerichtet
