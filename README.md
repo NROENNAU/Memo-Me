@@ -31,18 +31,6 @@ types/        Gemeinsame TypeScript-Datentypen
 db/           SQLite-Datenbankschema und -Initialisierung
 ```
 
-## Web-Version zum Testen
-
-Die App läuft aktuell **zusätzlich als Web-App** und ist über GitHub Pages von
-jedem internetfähigen Gerät aus testbar, ohne Installation:
-
-**https://nroennau.github.io/Memo-Me/**
-
-Jeder Push auf diesen Branch baut die Web-Version automatisch neu (siehe
-`.github/workflows/deploy-web.yml`). Die Web-Version speichert ihre Daten
-lokal im Browser (nicht in der SQLite-Datenbank) – Web- und Handy-Version
-teilen sich aktuell noch keine Daten.
-
 ## Setup & Ausführen
 
 Voraussetzung: [Node.js](https://nodejs.org/) ist installiert.
@@ -56,20 +44,35 @@ Danach öffnet sich ein QR-Code im Terminal/Browser. Auf dem eigenen Smartphone
 die **Expo Go**-App installieren (App Store / Play Store) und den QR-Code
 scannen – die App startet direkt auf dem Handy.
 
-Für die Web-Version lokal: `npx expo start --web`.
+## Testen auf dem Handy
+
+Die eigentliche Weiterentwicklung findet im Browser-Chat statt. Zum Testen auf
+einem echten iPhone/iPad wird kurz zu einer Mac-Terminal-Unterhaltung
+gewechselt (dort sind Node.js, Git, GitHub-Login und Claude Code bereits
+eingerichtet, verbunden über `claude --teleport`). Dort reicht eine einfache
+Bitte in normaler Sprache wie "hol den neuesten Stand und starte den Server
+zum Testen" – im Hintergrund läuft dann:
+
+1. `git pull` – neuesten Code holen
+2. `npm install` – falls sich Abhängigkeiten geändert haben
+3. `npx expo start` – kein Tunnel nötig, da Mac und Handy im selben WLAN sind
+4. QR-Code im Terminal erscheint → mit Expo Go scannen
+
+Ein direkter Tunnel-Test aus der Cloud-Umgebung heraus (ohne Mac) ist aktuell
+nicht möglich – die Sicherheitsschicht dieser Cloud-Session blockiert
+Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 
 ## Aktueller Stand
 
 - ✅ Expo-TypeScript-Projekt mit sauberer Ordnerstruktur
-- ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`) – nativ
-- ✅ Web-Version über `react-native-web`, Datenhaltung dort über den Browser-Speicher
-- ✅ Automatisches Deployment der Web-Version auf GitHub Pages
+- ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`)
 - ✅ Grundgerüst für die Foto-Berechtigungsabfrage (iOS & Android)
 - ✅ Platzhalter-Bildschirm `PhotoSwipeScreen` mit persistenter Aktionsleiste (`ActionBar`) am unteren Rand
 - ✅ Navigation zwischen Screens eingerichtet
 
 ## Was als Nächstes kommt
 
+- Nativen Testablauf verifizieren (Mac + Expo Go, siehe "Testen auf dem Handy")
 - Onboarding-Screen mit Privacy-Hinweis und Berechtigungsanfrage
 - Auswahl eines Fotoalbums als Quiz-Pool
 - Echte Swipe-Quiz-Logik (Frage anzeigen, Antwort erfassen, auswerten)
