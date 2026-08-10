@@ -27,9 +27,10 @@
         {
           "photosPermission": "Memo-Me benötigt Zugriff auf deine Fotos, um sie im Quiz anzuzeigen. Deine Fotos verlassen niemals dein Gerät.",
           "savePhotosPermission": "Memo-Me möchte Fotos speichern.",
-          "isAccessMediaLocationEnabled": false
+          "isAccessMediaLocationEnabled": true
         }
-      ]
+      ],
+      "expo-image"
     ]
   }
 }

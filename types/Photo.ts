@@ -11,3 +11,22 @@ export interface Photo {
   // SQLite kennt keine Array-Spalten, daher wird dieses Feld als JSON-String gespeichert.
   tags: string[];
 }
+
+// Geografische Koordinaten, wie sie im Foto hinterlegt sein können.
+export interface PhotoCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
+// Ein Foto, so wie es frisch aus der Gerätemediathek gelesen wurde –
+// noch bevor es in unsere Datenbank übernommen wird.
+export interface LibraryPhoto {
+  // ID des Fotos in der Mediathek des Geräts (nicht unsere Datenbank-ID)
+  assetId: string;
+  // Anzeigbarer Pfad zum Bild
+  uri: string;
+  // Aufnahmezeitpunkt (Unix-Millisekunden), null wenn das Gerät ihn nicht liefert
+  creationTime: number | null;
+  // Aufnahmeort, null wenn im Foto kein Ort hinterlegt ist
+  coordinates: PhotoCoordinates | null;
+}

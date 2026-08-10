@@ -4,6 +4,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme';
 
 interface ActionBarProps {
   onConfirm?: () => void;
@@ -18,13 +19,13 @@ export function ActionBar({ onConfirm, onSkip, onHint }: ActionBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom + 12 }]}>
+    <View style={[styles.container, { paddingBottom: insets.bottom + spacing.md }]}>
       <Pressable
         style={styles.button}
         onPress={onSkip}
         accessibilityRole="button"
         accessibilityLabel="Frage überspringen"
-        hitSlop={8}
+        hitSlop={spacing.sm}
       >
         <Text style={styles.buttonText}>Überspringen</Text>
       </Pressable>
@@ -33,7 +34,7 @@ export function ActionBar({ onConfirm, onSkip, onHint }: ActionBarProps) {
         onPress={onHint}
         accessibilityRole="button"
         accessibilityLabel="Hinweis anzeigen"
-        hitSlop={8}
+        hitSlop={spacing.sm}
       >
         <Text style={styles.buttonText}>Hinweis</Text>
       </Pressable>
@@ -42,7 +43,7 @@ export function ActionBar({ onConfirm, onSkip, onHint }: ActionBarProps) {
         onPress={onConfirm}
         accessibilityRole="button"
         accessibilityLabel="Antwort bestätigen"
-        hitSlop={8}
+        hitSlop={spacing.sm}
       >
         <Text style={[styles.buttonText, styles.confirmButtonText]}>Bestätigen</Text>
       </Pressable>
@@ -54,31 +55,31 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 12,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#D0D0D0',
-    backgroundColor: '#FFFFFF',
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
   },
   button: {
     flex: 1,
-    minHeight: 44, // Mindest-Touch-Ziel für Barrierefreiheit
+    minHeight: MIN_TOUCH_TARGET, // Mindest-Touch-Ziel für Barrierefreiheit
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#EFEFEF',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.background,
   },
   confirmButton: {
-    backgroundColor: '#2E7D32',
+    backgroundColor: colors.primary,
   },
   buttonText: {
+    ...typography.button,
     fontSize: 15,
-    fontWeight: '600',
-    color: '#1A1A1A',
+    color: colors.textPrimary,
   },
   confirmButtonText: {
-    color: '#FFFFFF',
+    color: colors.textOnPrimary,
   },
 });

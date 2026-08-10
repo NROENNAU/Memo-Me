@@ -66,22 +66,26 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 
 - ✅ Expo-TypeScript-Projekt mit sauberer Ordnerstruktur
 - ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`)
-- ✅ Grundgerüst für die Foto-Berechtigungsabfrage (iOS & Android)
-- ✅ Platzhalter-Bildschirm `PhotoSwipeScreen` mit persistenter Aktionsleiste (`ActionBar`) am unteren Rand
-- ✅ Navigation zwischen Screens eingerichtet
+- ✅ Gemeinsame Design-Grundlage (`theme/`) mit Farben, Schriften und Abständen aus den Mockups
+- ✅ Willkommens-Bildschirm (`OnboardingScreen`) mit Privacy-Hinweis und Berechtigungsabfrage,
+  inklusive verständlichem Hinweis, falls der Zugriff abgelehnt wurde
+- ✅ Echter Zugriff auf die Fotomediathek: neuestes Foto wird mit Aufnahmedatum und
+  (falls vorhanden) Ort angezeigt
+- ✅ Persistente Aktionsleiste (`ActionBar`) am unteren Rand
+- ✅ Navigation: Onboarding nur beim ersten Mal, danach direkt ins Quiz
 
 ## Design
 
 Ein Mockup-Sheet als Stil-Referenz (Farben, Typografie, Layout) liegt unter
 [`design/mockups/`](./design/mockups/) – siehe dortige README für Details, welche
-Screens zum aktuellen MVP gehören und welche zurückgestellt sind.
+Screens zum aktuellen MVP gehören und welche zurückgestellt sind. Die daraus
+abgeleiteten Farb- und Schriftwerte stehen zentral in [`theme/`](./theme/).
 
 ## Was als Nächstes kommt
 
-- Nativen Testablauf verifizieren (Mac + Expo Go, siehe "Testen auf dem Handy")
-- Onboarding-Screen mit Privacy-Hinweis und Berechtigungsanfrage
-- Auswahl eines Fotoalbums als Quiz-Pool
+- Auswahl der Fotoquelle als Quiz-Pool (letzte Fotos, letztes Jahr, Album …)
 - Echte Swipe-Quiz-Logik (Frage anzeigen, Antwort erfassen, auswerten)
+- Ortsnamen statt Koordinaten für die "Wo"-Frage
 - Wikimedia-"On this day"-Integration für historische Fakten
 - On-Device-Bildbearbeitung als Proof-of-Concept (z. B. weichgezeichnetes Foto)
 - Ergebnis-Bildschirm nach einer Quiz-Runde
