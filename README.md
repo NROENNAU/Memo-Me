@@ -70,6 +70,12 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 - ✅ Platzhalter-Bildschirm `PhotoSwipeScreen` mit persistenter Aktionsleiste (`ActionBar`) am unteren Rand
 - ✅ Navigation zwischen Screens eingerichtet
 
+## Design
+
+Ein Mockup-Sheet als Stil-Referenz (Farben, Typografie, Layout) liegt unter
+[`design/mockups/`](./design/mockups/) – siehe dortige README für Details, welche
+Screens zum aktuellen MVP gehören und welche zurückgestellt sind.
+
 ## Was als Nächstes kommt
 
 - Nativen Testablauf verifizieren (Mac + Expo Go, siehe "Testen auf dem Handy")
