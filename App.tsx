@@ -7,6 +7,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { OnboardingScreen } from './screens/OnboardingScreen';
+import { PhotoSourceScreen } from './screens/PhotoSourceScreen';
 import { PhotoSwipeScreen } from './screens/PhotoSwipeScreen';
 import { usePhotoLibraryPermission } from './hooks/usePhotoLibraryPermission';
 import { initDatabase } from './db/database';
@@ -42,8 +43,11 @@ export default function App() {
         <NavigationContainer>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             {hasPermission ? (
-              // Zugriff erlaubt: direkt ins Quiz, ohne erneutes Onboarding.
-              <Stack.Screen name="PhotoSwipe" component={PhotoSwipeScreen} />
+              // Zugriff erlaubt: direkt zur Fotoquellen-Auswahl, ohne erneutes Onboarding.
+              <>
+                <Stack.Screen name="PhotoSource" component={PhotoSourceScreen} />
+                <Stack.Screen name="PhotoSwipe" component={PhotoSwipeScreen} />
+              </>
             ) : (
               <Stack.Screen name="Onboarding">
                 {() => (

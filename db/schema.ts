@@ -22,3 +22,15 @@ CREATE TABLE IF NOT EXISTS QuizErgebnisse (
   datum INTEGER NOT NULL                         -- Zeitpunkt der Beantwortung (Unix-Millisekunden)
 );
 `;
+
+// Tabelle "Erinnerungen": vom Nutzer selbst erzählte Geschichten/Namen zu
+// einem Foto. Grundlage für persönlichere Quizfragen (z. B. eine spätere
+// "Wer"-Frage), die mit der Zeit aus diesen Einträgen entstehen.
+export const CREATE_ERINNERUNGEN_TABLE = `
+CREATE TABLE IF NOT EXISTS Erinnerungen (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  foto_id INTEGER NOT NULL REFERENCES Fotos(id), -- Bezug zum erzählten Foto
+  text TEXT NOT NULL,                            -- vom Nutzer eingegebene Geschichte/Name
+  erstellt_am INTEGER NOT NULL                   -- Zeitpunkt der Eingabe (Unix-Millisekunden)
+);
+`;

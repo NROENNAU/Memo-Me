@@ -14,17 +14,19 @@ Fotos (noch nicht implementiert, siehe unten).
 
 | Baustein | Zweck |
 |---|---|
-| Expo (SDK 57) / React Native | Basis-Framework für die App, läuft auf iOS und Android |
+| Expo (SDK 54) / React Native | Basis-Framework für die App, läuft auf iOS und Android |
 | TypeScript | Typsicherheit, weniger Laufzeitfehler |
 | React Navigation | Navigation zwischen den Screens |
 | `expo-media-library` | Zugriff auf die Fotobibliothek des Geräts (mit Berechtigungsabfrage) |
+| `expo-location` | Reverse-Geocoding: wandelt GPS-Koordinaten eines Fotos in einen Ortsnamen um, komplett auf dem Gerät |
 | `expo-sqlite` | Lokale Datenhaltung (Fotos, Quiz-Fortschritt) – keine externe Datenbank |
+| `react-native-svg` | Kreisdiagramm im Ergebnis-Screen |
 
 ## Projektstruktur
 
 ```
 screens/      Ganze Bildschirme der App (z. B. der Quiz-Screen)
-components/   Wiederverwendbare UI-Bausteine (z. B. die Aktionsleiste)
+components/   Wiederverwendbare UI-Bausteine (z. B. die Antwort-Auswahl)
 services/     Anbindung an native Funktionen (z. B. Fotobibliothek)
 hooks/        Wiederverwendbare React-Logik (z. B. Berechtigungs-Status)
 types/        Gemeinsame TypeScript-Datentypen
@@ -69,10 +71,15 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 - ✅ Gemeinsame Design-Grundlage (`theme/`) mit Farben, Schriften und Abständen aus den Mockups
 - ✅ Willkommens-Bildschirm (`OnboardingScreen`) mit Privacy-Hinweis und Berechtigungsabfrage,
   inklusive verständlichem Hinweis, falls der Zugriff abgelehnt wurde
-- ✅ Echter Zugriff auf die Fotomediathek: neuestes Foto wird mit Aufnahmedatum und
-  (falls vorhanden) Ort angezeigt
-- ✅ Persistente Aktionsleiste (`ActionBar`) am unteren Rand
-- ✅ Navigation: Onboarding nur beim ersten Mal, danach direkt ins Quiz
+- ✅ Fotoquellen-Auswahl (`PhotoSourceScreen`, "Dein Erinnerungsdeck"): letzte Fotos,
+  letztes Jahr oder ein eigenes Album als Quiz-Pool
+- ✅ Echte Quiz-Logik: Wann- und Wo-Frage (Mehrfachauswahl, wechselt pro Foto), Ortsnamen
+  statt Koordinaten via Reverse-Geocoding, Ergebnisse werden in `QuizErgebnisse` gespeichert
+- ✅ Gestensteuerung statt Buttons: Antwort löst sich beim Antippen sofort auf, nach oben
+  wischen geht zum nächsten Foto
+- ✅ Ergebnis-Screen mit Kreisdiagramm nach Abschluss einer Runde, plus "Nochmal spielen"
+  und "Anderes Quiz starten"
+- ✅ Navigation: Onboarding nur beim ersten Mal, danach Fotoquelle → Quiz → Ergebnis
 
 ## Design
 
@@ -83,16 +90,16 @@ abgeleiteten Farb- und Schriftwerte stehen zentral in [`theme/`](./theme/).
 
 ## Was als Nächstes kommt
 
-- Auswahl der Fotoquelle als Quiz-Pool (letzte Fotos, letztes Jahr, Album …)
-- Echte Swipe-Quiz-Logik (Frage anzeigen, Antwort erfassen, auswerten)
-- Ortsnamen statt Koordinaten für die "Wo"-Frage
+- Wer-Frage (braucht erst eine Funktion zum Markieren von Personen auf Fotos)
 - Wikimedia-"On this day"-Integration für historische Fakten
 - On-Device-Bildbearbeitung als Proof-of-Concept (z. B. weichgezeichnetes Foto)
-- Ergebnis-Bildschirm nach einer Quiz-Runde
 
 ## Datenschutz
 
 Memo-Me verarbeitet Fotos ausschließlich lokal auf dem Gerät. Es werden keine
 Fotos, Namen oder sonstigen Daten an einen Server übertragen – mit Ausnahme
 der geplanten Wikimedia-Anfrage, die nur das Datum eines Fotos (keine
-Bilddaten) an die öffentliche Wikimedia-API sendet.
+Bilddaten) an die öffentliche Wikimedia-API sendet. Die Umwandlung von
+GPS-Koordinaten in Ortsnamen für die "Wo"-Frage läuft über den
+betriebssystemeigenen Geocoder (`expo-location`) – auch das bleibt komplett
+auf dem Gerät.

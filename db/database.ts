@@ -1,7 +1,7 @@
 // Zentrales Modul für den Zugriff auf die lokale SQLite-Datenbank.
 // Es gibt keine Cloud-Datenbank – alle Daten bleiben ausschließlich auf dem Gerät.
 import * as SQLite from 'expo-sqlite';
-import { CREATE_FOTOS_TABLE, CREATE_QUIZ_ERGEBNISSE_TABLE } from './schema';
+import { CREATE_FOTOS_TABLE, CREATE_QUIZ_ERGEBNISSE_TABLE, CREATE_ERINNERUNGEN_TABLE } from './schema';
 
 const DATABASE_NAME = 'memo-me.db';
 
@@ -21,4 +21,5 @@ export async function initDatabase(): Promise<void> {
   const database = getDatabase();
   await database.execAsync(CREATE_FOTOS_TABLE);
   await database.execAsync(CREATE_QUIZ_ERGEBNISSE_TABLE);
+  await database.execAsync(CREATE_ERINNERUNGEN_TABLE);
 }

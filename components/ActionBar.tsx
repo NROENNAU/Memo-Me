@@ -10,12 +10,13 @@ interface ActionBarProps {
   onConfirm?: () => void;
   onSkip?: () => void;
   onHint?: () => void;
+  confirmLabel?: string;
 }
 
 // Wichtig für Barrierefreiheit: Feedback (z. B. richtig/falsch) darf später
 // niemals nur über Farbe vermittelt werden, sondern immer zusätzlich über
 // Text oder Icon – das gilt auch für zukünftige Erweiterungen dieser Leiste.
-export function ActionBar({ onConfirm, onSkip, onHint }: ActionBarProps) {
+export function ActionBar({ onConfirm, onSkip, onHint, confirmLabel = 'Bestätigen' }: ActionBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -45,7 +46,7 @@ export function ActionBar({ onConfirm, onSkip, onHint }: ActionBarProps) {
         accessibilityLabel="Antwort bestätigen"
         hitSlop={spacing.sm}
       >
-        <Text style={[styles.buttonText, styles.confirmButtonText]}>Bestätigen</Text>
+        <Text style={[styles.buttonText, styles.confirmButtonText]}>{confirmLabel}</Text>
       </Pressable>
     </View>
   );

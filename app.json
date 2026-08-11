@@ -30,7 +30,12 @@
           "isAccessMediaLocationEnabled": true
         }
       ],
-      "expo-image"
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Memo-Me nutzt den Standortzugriff nur, um zu deinen Fotos passende Ortsnamen anzuzeigen. Deine Fotos verlassen niemals dein Gerät."
+        }
+      ]
     ]
   }
 }
