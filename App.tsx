@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { PhotoSourceScreen } from './screens/PhotoSourceScreen';
 import { PhotoSwipeScreen } from './screens/PhotoSwipeScreen';
+import { SettingsScreen } from './screens/SettingsScreen';
 import { usePhotoLibraryPermission } from './hooks/usePhotoLibraryPermission';
 import { initDatabase } from './db/database';
 import { RootStackParamList } from './types/navigation';
@@ -47,6 +48,7 @@ export default function App() {
               <>
                 <Stack.Screen name="PhotoSource" component={PhotoSourceScreen} />
                 <Stack.Screen name="PhotoSwipe" component={PhotoSwipeScreen} />
+                <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
               </>
             ) : (
               <Stack.Screen name="Onboarding">

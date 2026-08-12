@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 import { AlbumSummary, countPhotosForSource, getAlbums } from '../services/mediaLibraryService';
 import { PhotoSource } from '../types/PhotoSource';
 import { RootStackParamList } from '../types/navigation';
@@ -46,9 +47,19 @@ export function PhotoSourceScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title} accessibilityRole="header">
-          Dein Erinnerungsdeck
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title} accessibilityRole="header">
+            Dein Erinnerungsdeck
+          </Text>
+          <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            accessibilityRole="button"
+            accessibilityLabel="Einstellungen öffnen"
+            hitSlop={spacing.sm}
+          >
+            <Ionicons name="settings-outline" size={24} color={colors.textSecondary} />
+          </Pressable>
+        </View>
         <Text style={styles.subtitle}>Welche Fotos möchtest du für dein Quiz verwenden?</Text>
 
         <View style={styles.list}>
@@ -129,6 +140,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: spacing.xl,
     gap: spacing.lg,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     ...typography.title,

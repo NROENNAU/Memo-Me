@@ -5,4 +5,5 @@ export type RootStackParamList = {
   Onboarding: undefined;
   PhotoSource: undefined;
   PhotoSwipe: { source: PhotoSource };
+  Settings: undefined;
 };

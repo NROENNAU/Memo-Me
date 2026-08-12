@@ -35,6 +35,19 @@
         {
           "locationWhenInUsePermission": "Memo-Me nutzt den Standortzugriff nur, um zu deinen Fotos passende Ortsnamen anzuzeigen. Deine Fotos verlassen niemals dein Gerät."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Memo-Me nutzt deine Fotos nur, um daraus ein Profilbild auszuwählen.",
+          "cameraPermission": "Memo-Me nutzt die Kamera nur, um ein Profilbild aufzunehmen."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Memo-Me nutzt das Mikrofon nur, um deine gesprochenen Erinnerungen zu einem Foto aufzunehmen. Die Aufnahme bleibt auf deinem Gerät."
+        }
       ]
     ]
   }

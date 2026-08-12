@@ -7,6 +7,14 @@ import { LibraryPhoto } from '../types/Photo';
 import { PhotoSource } from '../types/PhotoSource';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Mitternacht (lokale Zeit) des Tages, an dem der Zeitstempel liegt.
+function startOfDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
 
 // Wandelt den expo-media-library-Status in unseren eigenen, einfacheren Status um.
 function mapStatus(status: MediaLibrary.PermissionStatus): PhotoPermissionStatus {
@@ -45,7 +53,7 @@ function optionsForSource(source: PhotoSource, limit: number): MediaLibrary.Asse
 }
 
 export interface CandidatePhoto {
-  id: string;
+  assetId: string;
   uri: string;
   creationTime: number | null;
 }
@@ -56,7 +64,7 @@ export interface CandidatePhoto {
 export async function listCandidatePhotos(source: PhotoSource, limit: number): Promise<CandidatePhoto[]> {
   const { assets } = await MediaLibrary.getAssetsAsync(optionsForSource(source, limit));
   return assets.map((asset) => ({
-    id: asset.id,
+    assetId: asset.id,
     uri: asset.uri,
     creationTime: asset.creationTime ?? null,
   }));
@@ -66,7 +74,7 @@ export async function listCandidatePhotos(source: PhotoSource, limit: number): P
 // nach. Bewusst pro Foto statt für den ganzen Pool, damit nur die tatsächlich
 // für die Quizrunde ausgewählten Fotos diesen teureren Aufruf durchlaufen.
 export async function resolvePhotoDetails(candidate: CandidatePhoto): Promise<LibraryPhoto> {
-  const info = await MediaLibrary.getAssetInfoAsync(candidate.id);
+  const info = await MediaLibrary.getAssetInfoAsync(candidate.assetId);
   // Auf iOS liefert diese Paketversion location.latitude/longitude als
   // String statt als Zahl (nativer Typ-Bug) – deshalb hier robust in
   // eine echte Zahl umwandeln, statt der rohen Native-Antwort zu trauen.
@@ -74,7 +82,7 @@ export async function resolvePhotoDetails(candidate: CandidatePhoto): Promise<Li
   const longitude = info.location ? Number(info.location.longitude) : NaN;
   const hasValidCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
   return {
-    assetId: candidate.id,
+    assetId: candidate.assetId,
     uri: info.localUri ?? info.uri,
     creationTime: info.creationTime,
     coordinates: hasValidCoordinates ? { latitude, longitude } : null,
@@ -96,6 +104,27 @@ export async function getAlbums(): Promise<AlbumSummary[]> {
     .map((album) => ({ id: album.id, title: album.title, assetCount: album.assetCount }));
 }
 
+// Prüft, ob ein Foto bereits in einem bestehenden Album steckt – auch wenn
+// die Zuordnung nicht über Memo-Me, sondern z. B. schon vorher in der
+// normalen Fotos-App gemacht wurde. iOS gibt (anders als Android) keine
+// Album-Zugehörigkeit direkt preis, deshalb wird hier jedes Album einzeln
+// nach dem Foto durchsucht – das kann bei vielen Alben/Fotos einen Moment
+// dauern. Aufrufer sollten das Ergebnis nach Möglichkeit selbst zwischenspeichern.
+export async function findAlbumContainingAsset(assetId: string): Promise<AlbumSummary | null> {
+  const albums = await getAlbums();
+  for (const album of albums) {
+    const { assets } = await MediaLibrary.getAssetsAsync({
+      album: album.id,
+      mediaType: MediaLibrary.MediaType.photo,
+      first: album.assetCount,
+    });
+    if (assets.some((asset) => asset.id === assetId)) {
+      return album;
+    }
+  }
+  return null;
+}
+
 // Zählt, wie viele Fotos für eine Quelle verfügbar sind (für die
 // Fotoquellen-Auswahl, z. B. "Letzte Fotos" vs. "Letztes Jahr").
 export async function countPhotosForSource(source: PhotoSource): Promise<number> {
@@ -104,4 +133,72 @@ export async function countPhotosForSource(source: PhotoSource): Promise<number>
     first: 0,
   });
   return totalCount;
+}
+
+// Löscht ein Foto endgültig aus der Gerätemediathek.
+export async function deleteAsset(assetId: string): Promise<void> {
+  await MediaLibrary.deleteAssetsAsync([assetId]);
+}
+
+// Ordnet ein Foto einem bestehenden Album zu.
+export async function addPhotoToAlbum(assetId: string, albumId: string): Promise<void> {
+  await MediaLibrary.addAssetsToAlbumAsync([assetId], albumId, false);
+}
+
+// Ordnet mehrere Fotos einem bestehenden Album zu (für "ähnliche Fotos auch?").
+export async function addPhotosToAlbum(assetIds: string[], albumId: string): Promise<void> {
+  await MediaLibrary.addAssetsToAlbumAsync(assetIds, albumId, false);
+}
+
+// Legt ein neues Album an und ordnet ihm direkt das gegebene Foto zu.
+export async function createAlbumWithPhoto(name: string, assetId: string): Promise<string> {
+  const album = await MediaLibrary.createAlbumAsync(name, assetId, false);
+  return album.id;
+}
+
+// Schlägt ein bestehendes Album für ein Foto vor: das erste Album, das
+// bereits ein Foto vom selben Kalendertag enthält. Kein echtes
+// Bildverständnis – nur eine Datum-Heuristik, aber ein guter, günstiger
+// erster Anhaltspunkt ("Fotos vom selben Anlass").
+export async function suggestAlbumForPhoto(photo: LibraryPhoto): Promise<AlbumSummary | null> {
+  if (!photo.creationTime) return null;
+  const dayStart = startOfDay(photo.creationTime);
+  const dayEnd = dayStart + ONE_DAY_MS;
+
+  const albums = await getAlbums();
+  for (const album of albums) {
+    const { totalCount } = await MediaLibrary.getAssetsAsync({
+      album: album.id,
+      mediaType: MediaLibrary.MediaType.photo,
+      createdAfter: dayStart,
+      createdBefore: dayEnd,
+      first: 0,
+    });
+    if (totalCount > 0) return album;
+  }
+  return null;
+}
+
+// Findet "ähnliche" Fotos zu einem gegebenen Foto: alle anderen Fotos vom
+// selben Kalendertag. Gleiche Heuristik wie bei suggestAlbumForPhoto.
+export async function findSimilarPhotos(
+  photo: LibraryPhoto,
+  excludeAssetId: string,
+  limit = 30
+): Promise<CandidatePhoto[]> {
+  if (!photo.creationTime) return [];
+  const dayStart = startOfDay(photo.creationTime);
+  const dayEnd = dayStart + ONE_DAY_MS;
+
+  const { assets } = await MediaLibrary.getAssetsAsync({
+    mediaType: MediaLibrary.MediaType.photo,
+    createdAfter: dayStart,
+    createdBefore: dayEnd,
+    sortBy: [MediaLibrary.SortBy.creationTime],
+    first: limit,
+  });
+
+  return assets
+    .filter((asset) => asset.id !== excludeAssetId)
+    .map((asset) => ({ assetId: asset.id, uri: asset.uri, creationTime: asset.creationTime ?? null }));
 }

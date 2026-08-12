@@ -4,19 +4,30 @@
 // Wisch-Geste nach oben (kein Bestätigen-/Überspringen-Button mehr).
 // Die Wer-Frage folgt in einem späteren Schritt (braucht erst Personen-Tags).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Image } from 'expo-image';
+import { AlbumPickerModal } from '../components/AlbumPickerModal';
 import { AnswerOptions } from '../components/AnswerOptions';
+import { AudioPlayButton } from '../components/AudioPlayButton';
 import { MemoryPrompt } from '../components/MemoryPrompt';
+import { PhotoActions } from '../components/PhotoActions';
 import { ScoreRing } from '../components/ScoreRing';
-import { listCandidatePhotos, resolvePhotoDetails } from '../services/mediaLibraryService';
+import {
+  addPhotosToAlbum,
+  deleteAsset,
+  findAlbumContainingAsset,
+  findSimilarPhotos,
+  listCandidatePhotos,
+  resolvePhotoDetails,
+} from '../services/mediaLibraryService';
 import { reverseGeocode } from '../services/locationService';
 import { buildWannQuestion, buildWoQuestion, shuffle } from '../services/quizService';
 import { upsertPhoto } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
-import { saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
+import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
+import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
 import { LibraryPhoto } from '../types/Photo';
 import { RootStackParamList } from '../types/navigation';
 import { colors, spacing, radius, typography } from '../theme';
@@ -51,7 +62,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [promptPhotoUri, setPromptPhotoUri] = useState<string | null>(null);
   const [memoryPromptFotoId, setMemoryPromptFotoId] = useState<number | null>(null);
   const [isPromptDone, setIsPromptDone] = useState(false);
-  const [revealedMemoryText, setRevealedMemoryText] = useState<string | null>(null);
+  const [revealedMemory, setRevealedMemory] = useState<Memory | null>(null);
+  const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
+  const [currentAlbum, setCurrentAlbum] = useState<AlbumAssignment | null>(null);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -118,7 +131,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       setCurrentIndex(0);
       setSelectedOption(null);
       setIsRevealed(false);
-      setRevealedMemoryText(null);
+      setRevealedMemory(null);
       setScore({ correct: 0, total: 0 });
     } catch (error) {
       if (!isMountedRef.current) return;
@@ -155,16 +168,54 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     return null;
   }, [currentItem, photos, currentIndex]);
 
+  // Prüft für das aktuelle Foto, ob es schon einem Album zugeordnet ist –
+  // erst der schnelle, eigene Cache (FotoAlben), und nur falls dort nichts
+  // bekannt ist, zusätzlich ein echter Abgleich mit allen Alben der
+  // Mediathek (deckt auch Zuordnungen ab, die nicht über Memo-Me gemacht
+  // wurden). Ein gefundenes Ergebnis wird im Cache abgelegt, damit der
+  // langsame Abgleich pro Foto nur einmal nötig ist.
+  useEffect(() => {
+    if (!currentItem) {
+      setCurrentAlbum(null);
+      return;
+    }
+    let isActive = true;
+
+    (async () => {
+      try {
+        const fotoId = await upsertPhoto(currentItem.photo);
+        let assignment = await getCurrentAlbumForPhoto(fotoId);
+
+        if (!assignment) {
+          const nativeAlbum = await findAlbumContainingAsset(currentItem.photo.assetId);
+          if (!isActive) return;
+          if (nativeAlbum) {
+            assignment = { albumId: nativeAlbum.id, albumTitle: nativeAlbum.title };
+            await saveAlbumAssignment(fotoId, nativeAlbum.id, nativeAlbum.title);
+          }
+        }
+
+        if (isActive) setCurrentAlbum(assignment);
+      } catch (error) {
+        console.error('Album-Zuordnung konnte nicht geladen werden:', error);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [currentItem]);
+
   function goToNextPhoto() {
     setSelectedOption(null);
     setIsRevealed(false);
-    setRevealedMemoryText(null);
+    setRevealedMemory(null);
     setCurrentIndex((index) => index + 1);
   }
 
-  function handleMemorySubmit(text: string) {
+  function handleMemorySubmit(memory: { text: string | null; audioUri: string | null }) {
     if (memoryPromptFotoId !== null) {
-      saveMemory(memoryPromptFotoId, text).catch((error) => {
+      saveMemory(memoryPromptFotoId, memory).catch((error) => {
         console.error('Erinnerung konnte nicht gespeichert werden:', error);
       });
     }
@@ -194,9 +245,77 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       // Falls zu diesem Foto schon eine eigene Geschichte hinterlegt ist,
       // zeigen wir sie jetzt als kleines Extra zur Antwort.
       const memory = await getMemoryForPhoto(fotoId);
-      if (isMountedRef.current) setRevealedMemoryText(memory);
+      if (isMountedRef.current) setRevealedMemory(memory);
     } catch (error) {
       console.error('Quizergebnis konnte nicht gespeichert werden:', error);
+    }
+  }
+
+  function handleDeletePhoto() {
+    if (!currentItem) return;
+    Alert.alert(
+      'Foto löschen?',
+      'Das Foto wird dauerhaft aus deiner Mediathek gelöscht. Das lässt sich nicht rückgängig machen.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Löschen',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteAsset(currentItem.photo.assetId);
+              if (isMountedRef.current) goToNextPhoto();
+            } catch (error) {
+              console.error('Foto konnte nicht gelöscht werden:', error);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  function handleOpenAlbumPicker() {
+    setIsAlbumPickerOpen(true);
+  }
+
+  async function handleAlbumAssigned(albumId: string, albumTitle: string) {
+    setIsAlbumPickerOpen(false);
+    if (!currentItem) return;
+
+    setCurrentAlbum({ albumId, albumTitle });
+    try {
+      const fotoId = await upsertPhoto(currentItem.photo);
+      await saveAlbumAssignment(fotoId, albumId, albumTitle);
+    } catch (error) {
+      console.error('Album-Zuordnung konnte nicht gespeichert werden:', error);
+    }
+
+    try {
+      const similar = await findSimilarPhotos(currentItem.photo, currentItem.photo.assetId);
+      if (!isMountedRef.current || similar.length === 0) return;
+
+      Alert.alert(
+        'Ähnliche Fotos gefunden',
+        `${similar.length} weitere Foto${similar.length === 1 ? '' : 's'} vom selben Tag gefunden. Auch zu „${albumTitle}“ hinzufügen?`,
+        [
+          { text: 'Nein', style: 'cancel' },
+          {
+            text: 'Ja, alle hinzufügen',
+            onPress: async () => {
+              try {
+                await addPhotosToAlbum(
+                  similar.map((candidate) => candidate.assetId),
+                  albumId
+                );
+              } catch (error) {
+                console.error('Ähnliche Fotos konnten nicht hinzugefügt werden:', error);
+              }
+            },
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Ähnliche Fotos konnten nicht gesucht werden:', error);
     }
   }
 
@@ -286,13 +405,35 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && !showMemoryPrompt && !isFinished && currentItem && question && (
           <>
-            <Text style={styles.heading}>{headingText}</Text>
-            <Image
-              source={{ uri: currentItem.photo.uri }}
-              style={styles.photo}
-              contentFit="cover"
-              accessibilityLabel="Ein Foto aus deiner Mediathek"
-            />
+            {isRevealed ? (
+              <PhotoActions
+                onDelete={handleDeletePhoto}
+                onAddToAlbum={handleOpenAlbumPicker}
+                albumLabel={currentAlbum?.albumTitle}
+              />
+            ) : (
+              <Text style={styles.heading}>{headingText}</Text>
+            )}
+            <View style={styles.photoWrapper}>
+              <Image
+                source={{ uri: currentItem.photo.uri }}
+                style={styles.photo}
+                contentFit="cover"
+                accessibilityLabel="Ein Foto aus deiner Mediathek"
+              />
+              {currentAlbum && (
+                <Pressable
+                  style={styles.albumBadge}
+                  onPress={handleOpenAlbumPicker}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Album: ${currentAlbum.albumTitle}, zum Umsortieren antippen`}
+                >
+                  <Text style={styles.albumBadgeText} numberOfLines={1}>
+                    {currentAlbum.albumTitle}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
             <AnswerOptions
               options={question.options}
               selectedOption={selectedOption}
@@ -300,15 +441,26 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
               isRevealed={isRevealed}
               onSelect={handleSelectAnswer}
             />
-            {isRevealed && revealedMemoryText && (
+            {isRevealed && revealedMemory && (
               <View style={styles.memoryBox}>
-                <Text style={styles.memoryText}>📝 {revealedMemoryText}</Text>
+                {revealedMemory.text && <Text style={styles.memoryText}>📝 {revealedMemory.text}</Text>}
+                {revealedMemory.audioUri && <AudioPlayButton uri={revealedMemory.audioUri} />}
               </View>
             )}
             {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
           </>
         )}
       </View>
+
+      {currentItem && (
+        <AlbumPickerModal
+          visible={isAlbumPickerOpen}
+          photo={currentItem.photo}
+          currentAlbum={currentAlbum}
+          onClose={() => setIsAlbumPickerOpen(false)}
+          onDone={handleAlbumAssigned}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -335,11 +487,30 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlign: 'center',
   },
-  photo: {
+  photoWrapper: {
     width: '100%',
     flex: 1,
+  },
+  photo: {
+    width: '100%',
+    height: '100%',
     borderRadius: radius.lg,
     backgroundColor: colors.background,
+  },
+  albumBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    maxWidth: '70%',
+    backgroundColor: 'rgba(26,26,46,0.72)',
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  albumBadgeText: {
+    ...typography.caption,
+    color: colors.textOnPrimary,
+    fontWeight: '600',
   },
   hintText: {
     ...typography.caption,
@@ -351,6 +522,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
     borderRadius: radius.md,
     padding: spacing.md,
+    gap: spacing.sm,
   },
   memoryText: {
     ...typography.body,
