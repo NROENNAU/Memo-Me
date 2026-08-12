@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Memo-Me",
+    "slug": "memo-me",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Memo-Me benötigt Zugriff auf deine Fotos, um sie im Quiz anzuzeigen. Deine Fotos verlassen niemals dein Gerät.",
+          "savePhotosPermission": "Memo-Me möchte Fotos speichern.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Memo-Me nutzt den Standortzugriff nur, um zu deinen Fotos passende Ortsnamen anzuzeigen. Deine Fotos verlassen niemals dein Gerät."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Memo-Me nutzt deine Fotos nur, um daraus ein Profilbild auszuwählen.",
+          "cameraPermission": "Memo-Me nutzt die Kamera nur, um ein Profilbild aufzunehmen."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Memo-Me nutzt das Mikrofon nur, um deine gesprochenen Erinnerungen zu einem Foto aufzunehmen. Die Aufnahme bleibt auf deinem Gerät."
+        }
+      ]
+    ]
+  }
+}
