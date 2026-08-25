@@ -1,14 +1,15 @@
 // Erinnerungsdeck: der Home-Screen der App, zu dem man immer zurückkehrt.
-// Zeigt die verfügbaren Foto-Quellen als quadratische Kacheln mit
-// Vorschaubild - angelehnt an die Bibliotheks-Ansicht der Apple Fotos-App,
-// aber kompakt gehalten. Eine Quelle muss aktiv gewählt werden, um ins Quiz
-// zu starten.
+// Zeigt die verfügbaren Foto-Quellen als quadratische Kacheln - angelehnt an
+// die Bibliotheks-Ansicht der Apple Fotos-App, aber kompakt gehalten. Nutzt
+// bewusst feste Icons statt echter Vorschaubilder (siehe SourceTile) - die
+// kommen in einem späteren, performanteren Anlauf. Eine Quelle muss aktiv
+// gewählt werden, um ins Quiz zu starten.
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { countPhotosForSource, getAlbums, getCoverPhotoUri } from '../services/mediaLibraryService';
+import { countPhotosForSource, getAlbums } from '../services/mediaLibraryService';
 import { SourceTile } from '../components/SourceTile';
 import { PhotoSource } from '../types/PhotoSource';
 import { RootStackParamList } from '../types/navigation';
@@ -16,11 +17,13 @@ import { colors, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSource'>;
 
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
 interface Tile {
   key: string;
   title: string;
   subtitle: string;
-  coverUri: string | null;
+  icon: IconName;
   source: PhotoSource;
 }
 
@@ -33,13 +36,10 @@ export function PhotoSourceScreen({ navigation }: Props) {
 
     async function load() {
       try {
-        // Letzte Fotos/Letztes Jahr sofort anzeigen, statt auf die
-        // Album-Vorschauen zu warten.
-        const [recentCount, recentCover, lastYearCount, lastYearCover] = await Promise.all([
+        const [recentCount, lastYearCount, albums] = await Promise.all([
           countPhotosForSource({ type: 'recent' }),
-          getCoverPhotoUri({ type: 'recent' }),
           countPhotosForSource({ type: 'lastYear' }),
-          getCoverPhotoUri({ type: 'lastYear' }),
+          getAlbums(),
         ]);
         if (!isActive) return;
 
@@ -48,41 +48,26 @@ export function PhotoSourceScreen({ navigation }: Props) {
             key: 'recent',
             title: 'Letzte Fotos',
             subtitle: `${recentCount} verfügbar`,
-            coverUri: recentCover,
+            icon: 'time-outline',
             source: { type: 'recent' },
           },
           {
             key: 'lastYear',
             title: 'Letztes Jahr',
             subtitle: `${lastYearCount} verfügbar`,
-            coverUri: lastYearCover,
+            icon: 'calendar-outline',
             source: { type: 'lastYear' },
           },
-        ]);
-
-        // Album-Vorschauen nacheinander statt parallel nachladen - bei
-        // vielen Alben würde eine parallele Abfrage die Mediathek
-        // überlasten und den Screen einfrieren lassen. Jede fertige Kachel
-        // erscheint sofort, statt auf alle Alben zu warten.
-        const albums = await getAlbums();
-        if (!isActive) return;
-
-        for (const album of albums) {
-          if (!isActive) return;
-          const source: PhotoSource = { type: 'album', albumId: album.id, albumTitle: album.title };
-          const coverUri = await getCoverPhotoUri(source);
-          if (!isActive) return;
-          setTiles((previous) => [
-            ...(previous ?? []),
-            {
+          ...albums.map(
+            (album): Tile => ({
               key: `album-${album.id}`,
               title: album.title,
               subtitle: `${album.assetCount} Fotos`,
-              coverUri,
-              source,
-            },
-          ]);
-        }
+              icon: 'albums-outline',
+              source: { type: 'album', albumId: album.id, albumTitle: album.title },
+            })
+          ),
+        ]);
       } catch (error) {
         if (!isActive) return;
         console.error('Erinnerungsdeck konnte nicht geladen werden:', error);
@@ -128,7 +113,7 @@ export function PhotoSourceScreen({ navigation }: Props) {
                 key={tile.key}
                 title={tile.title}
                 subtitle={tile.subtitle}
-                coverUri={tile.coverUri}
+                icon={tile.icon}
                 onPress={() => selectSource(tile.source)}
               />
             ))}

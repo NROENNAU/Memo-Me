@@ -1,19 +1,20 @@
-// Quadratische Kachel mit Vorschaubild für eine Quiz-Fotoquelle (Erinnerungsdeck-
-// Startbildschirm) - angelehnt an die Bibliotheks-Ansicht der Apple Fotos-App,
-// aber kompakter: Titel und Anzahl liegen direkt auf dem Vorschaubild.
+// Quadratische Kachel für eine Quiz-Fotoquelle (Erinnerungsdeck-Startbildschirm).
+// Nutzt bewusst ein festes Icon statt eines echten Vorschaubilds - Fotoladen
+// pro Kachel hat bei sehr großen Bibliotheken den Screen hängen lassen. Echte
+// Vorschaubilder kommen in einem späteren, performanteren Anlauf.
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radius, spacing, typography } from '../theme';
 
 interface SourceTileProps {
   title: string;
   subtitle?: string;
-  coverUri: string | null;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
   onPress: () => void;
 }
 
-export function SourceTile({ title, subtitle, coverUri, onPress }: SourceTileProps) {
+export function SourceTile({ title, subtitle, icon, onPress }: SourceTileProps) {
   return (
     <Pressable
       style={styles.tile}
@@ -21,22 +22,17 @@ export function SourceTile({ title, subtitle, coverUri, onPress }: SourceTilePro
       accessibilityRole="button"
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
     >
-      {coverUri ? (
-        <Image source={{ uri: coverUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, styles.placeholder]} />
-      )}
-      <View style={styles.scrim} />
-      <View style={styles.labelContainer}>
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle && (
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        )}
+      <View style={styles.iconCircle}>
+        <Ionicons name={icon} size={28} color={colors.primary} />
       </View>
+      <Text style={styles.title} numberOfLines={1}>
+        {title}
+      </Text>
+      {subtitle && (
+        <Text style={styles.subtitle} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -46,34 +42,32 @@ const styles = StyleSheet.create({
     width: '48%',
     aspectRatio: 1,
     borderRadius: radius.lg,
-    overflow: 'hidden',
-    backgroundColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.md,
+    gap: spacing.xs,
   },
-  placeholder: {
-    backgroundColor: colors.border,
-  },
-  scrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '45%',
-    backgroundColor: 'rgba(26,26,46,0.55)',
-  },
-  labelContainer: {
-    position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    bottom: spacing.sm,
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primarySoft,
+    marginBottom: spacing.xs,
   },
   title: {
     ...typography.body,
     fontWeight: '700',
-    color: colors.textOnPrimary,
+    color: colors.textPrimary,
+    textAlign: 'center',
   },
   subtitle: {
     ...typography.caption,
-    color: colors.textOnPrimary,
-    opacity: 0.85,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
 });
