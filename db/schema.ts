@@ -61,3 +61,16 @@ CREATE TABLE IF NOT EXISTS Profil (
   avatar_uri TEXT
 );
 `;
+
+// Tabelle "FotoKlassifikation": Cache für die on-device Bilderkennung, damit
+// dasselbe Foto nicht bei jeder Quizrunde erneut klassifiziert werden muss.
+// ist_muell markiert Screenshots/Belege/Dokumente, die nicht ins Quiz sollen.
+export const CREATE_FOTO_KLASSIFIKATION_TABLE = `
+CREATE TABLE IF NOT EXISTS FotoKlassifikation (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  foto_id INTEGER NOT NULL UNIQUE REFERENCES Fotos(id),
+  ist_muell INTEGER NOT NULL,      -- 1 = Screenshot/Beleg/Dokument, 0 = brauchbares Foto
+  labels TEXT NOT NULL,            -- roh erkannte Labels als JSON, für spätere Nachjustierung
+  klassifiziert_am INTEGER NOT NULL
+);
+`;

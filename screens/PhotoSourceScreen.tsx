@@ -92,15 +92,6 @@ export function PhotoSourceScreen({ navigation }: Props) {
             </View>
           )}
         </View>
-
-        <Pressable
-          style={styles.skipButton}
-          onPress={() => selectSource({ type: 'recent' })}
-          accessibilityRole="button"
-          accessibilityLabel="Später auswählen, letzte Fotos verwenden"
-        >
-          <Text style={styles.skipButtonText}>Später auswählen</Text>
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -193,14 +184,5 @@ const styles = StyleSheet.create({
   emptyAlbumsText: {
     ...typography.caption,
     color: colors.textSecondary,
-  },
-  skipButton: {
-    minHeight: MIN_TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  skipButtonText: {
-    ...typography.button,
-    color: colors.primary,
   },
 });

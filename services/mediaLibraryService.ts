@@ -56,6 +56,8 @@ export interface CandidatePhoto {
   assetId: string;
   uri: string;
   creationTime: number | null;
+  filename: string;
+  mediaSubtypes?: string[];
 }
 
 // Schnelle, leichte Liste möglicher Fotos für eine Quelle (kein Ort, keine
@@ -67,6 +69,8 @@ export async function listCandidatePhotos(source: PhotoSource, limit: number): P
     assetId: asset.id,
     uri: asset.uri,
     creationTime: asset.creationTime ?? null,
+    filename: asset.filename,
+    mediaSubtypes: asset.mediaSubtypes,
   }));
 }
 
@@ -200,5 +204,11 @@ export async function findSimilarPhotos(
 
   return assets
     .filter((asset) => asset.id !== excludeAssetId)
-    .map((asset) => ({ assetId: asset.id, uri: asset.uri, creationTime: asset.creationTime ?? null }));
+    .map((asset) => ({
+      assetId: asset.id,
+      uri: asset.uri,
+      creationTime: asset.creationTime ?? null,
+      filename: asset.filename,
+      mediaSubtypes: asset.mediaSubtypes,
+    }));
 }

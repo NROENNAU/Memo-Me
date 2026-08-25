@@ -24,6 +24,7 @@ import {
 } from '../services/mediaLibraryService';
 import { reverseGeocode } from '../services/locationService';
 import { buildWannQuestion, buildWoQuestion, shuffle } from '../services/quizService';
+import { isJunkPhoto, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { upsertPhoto } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
@@ -35,8 +36,10 @@ import { colors, spacing, radius, typography } from '../theme';
 // Anzahl Fotos pro Quizrunde.
 const QUIZ_LENGTH = 10;
 // Größerer Pool, aus dem pro Runde zufällig QUIZ_LENGTH Fotos gezogen
-// werden – sonst wäre jede Runde (und jeder Neustart) identisch.
-const FETCH_POOL_SIZE = 40;
+// werden – sonst wäre jede Runde (und jeder Neustart) identisch. Bewusst
+// größer als QUIZ_LENGTH, da Screenshots/Belege/Dokumente aus dem Pool
+// herausgefiltert werden, bevor QUIZ_LENGTH brauchbare Fotos feststehen.
+const FETCH_POOL_SIZE = 80;
 // Ab dieser vertikalen Strecke (in Pixeln) zählt eine Wisch-nach-oben-Geste.
 const SWIPE_UP_THRESHOLD = 60;
 
@@ -83,50 +86,71 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
-      // (kein Ort, keine Detail-Infos) – das ist der einzige Schritt, bevor
-      // das erste Foto angezeigt werden kann.
+      // (kein Ort, keine Detail-Infos).
       const candidates = await listCandidatePhotos(source, FETCH_POOL_SIZE);
       if (!isMountedRef.current) return;
-      // Ohne Aufnahmedatum lässt sich keine "Wann"-Frage stellen.
-      const withDate = candidates.filter((candidate) => candidate.creationTime !== null);
-      // Zufällige Auswahl aus dem Pool, damit nicht jede Runde exakt
-      // dieselben (neuesten) Fotos zeigt.
-      const selected = shuffle(withDate).slice(0, QUIZ_LENGTH);
+      // Ohne Aufnahmedatum lässt sich keine "Wann"-Frage stellen. Screenshots
+      // lassen sich schon anhand vorhandener Metadaten aussortieren, noch
+      // bevor überhaupt Detail-Infos nachgeladen werden.
+      const withDate = candidates.filter(
+        (candidate) => candidate.creationTime !== null && !isLikelyScreenshot(candidate)
+      );
+      // Zufällige Reihenfolge, damit nicht jede Runde exakt dieselben
+      // (neuesten) Fotos zeigt.
+      const shuffled = shuffle(withDate);
 
-      if (selected.length === 0) {
+      if (shuffled.length === 0) {
         setPhotos([]);
         setIsPromptDone(true);
         return;
       }
 
-      // Erstes Foto sofort für die Erinnerungs-Frage zeigen – noch bevor die
-      // teureren Detail-Infos (Ort) für die Runde nachgeladen werden. So
-      // überbrückt die Frage die sonst tote Ladezeit, statt davor zu stehen.
-      const firstPhoto = selected[0];
-      const firstFotoId = await upsertPhoto(firstPhoto);
-      if (!isMountedRef.current) return;
-      const existingMemory = await getMemoryForPhoto(firstFotoId);
-      if (!isMountedRef.current) return;
-      if (existingMemory) {
-        setIsPromptDone(true);
-      } else {
-        setMemoryPromptFotoId(firstFotoId);
-        setPromptPhotoUri(firstPhoto.uri);
-      }
-
-      // Schritt 2: erst jetzt für die ausgewählten Fotos die vollen Details
-      // (u. a. Ort) nachladen – nacheinander, nicht parallel, um den
-      // Geocoding-Dienst nicht mit gleichzeitigen Anfragen zu überlasten.
+      // Schritt 2: Details nachladen (u. a. Ort) und per on-device
+      // Bilderkennung Belege/Dokumente aussortieren - nacheinander, bis
+      // QUIZ_LENGTH brauchbare Fotos feststehen oder der Pool erschöpft ist.
+      // Die Erinnerungs-Frage erscheint für das erste brauchbare Foto, sobald
+      // es feststeht - erst ab da ist sicher, dass es tatsächlich im Quiz landet.
       const quizPhotos: QuizPhoto[] = [];
-      for (const candidate of selected) {
+      let hasShownMemoryPrompt = false;
+
+      for (const candidate of shuffled) {
+        if (quizPhotos.length >= QUIZ_LENGTH) break;
         if (!isMountedRef.current) return;
+
         const photo = await resolvePhotoDetails(candidate);
         if (!isMountedRef.current) return;
+
+        const fotoId = await upsertPhoto(photo);
+        if (!isMountedRef.current) return;
+
+        if (await isJunkPhoto(fotoId, photo.uri)) continue;
+        if (!isMountedRef.current) return;
+
+        if (!hasShownMemoryPrompt) {
+          hasShownMemoryPrompt = true;
+          const existingMemory = await getMemoryForPhoto(fotoId);
+          if (!isMountedRef.current) return;
+          if (existingMemory) {
+            setIsPromptDone(true);
+          } else {
+            setMemoryPromptFotoId(fotoId);
+            setPromptPhotoUri(photo.uri);
+          }
+        }
+
         const locationName = photo.coordinates ? await reverseGeocode(photo.coordinates) : null;
+        if (!isMountedRef.current) return;
         quizPhotos.push({ photo, locationName });
       }
 
       if (!isMountedRef.current) return;
+
+      if (quizPhotos.length === 0) {
+        setPhotos([]);
+        setIsPromptDone(true);
+        return;
+      }
+
       setPhotos(quizPhotos);
       setCurrentIndex(0);
       setSelectedOption(null);
@@ -367,7 +391,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && photos?.length === 0 && (
           <Text style={styles.statusText}>
-            In deiner Mediathek wurden keine Fotos mit Aufnahmedatum gefunden.
+            In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum,
+            ohne Screenshots/Belege).
           </Text>
         )}
 
