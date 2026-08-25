@@ -54,6 +54,10 @@ const FETCH_POOL_SIZE = 80;
 // enthält dann statistisch kaum ein Treffer. Deutlich größerer Pool, dafür
 // dauert das Laden hier spürbar länger (siehe LOADING_MESSAGE unten).
 const CUSTOM_FETCH_POOL_SIZE = 250;
+// Wie viele Fotos gleichzeitig klassifiziert werden, statt strikt
+// nacheinander - die on-device Bilderkennung ist der langsamste Schritt
+// beim Laden, moderate Parallelität beschleunigt das spürbar.
+const CLASSIFICATION_CONCURRENCY = 4;
 // Ab dieser vertikalen Strecke (in Pixeln) zählt eine Wisch-nach-oben-Geste.
 const SWIPE_UP_THRESHOLD = 60;
 
@@ -77,6 +81,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 export function PhotoSwipeScreen({ route, navigation }: Props) {
   const { source } = route.params;
   const [photos, setPhotos] = useState<QuizPhoto[] | null>(null);
+  // Wird erst true, wenn der komplette Kandidaten-Pool durchsucht wurde -
+  // solange noch danach gesucht wird, ist "Foto-Ende erreicht" nicht
+  // gleichbedeutend mit "Runde fertig" (siehe isFinished/isSearching unten).
+  const [isSearchComplete, setIsSearchComplete] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
@@ -104,6 +112,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   const loadQuiz = useCallback(async () => {
     setPhotos(null);
+    setIsSearchComplete(false);
     setCuriosityQuestion(null);
     setCuriosityFotoId(null);
     setCuriosityPhotoUri(null);
@@ -127,67 +136,80 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
       if (shuffled.length === 0) {
         setPhotos([]);
+        setIsSearchComplete(true);
         return;
       }
 
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
-      // Bilderkennung Belege/Dokumente aussortieren - nacheinander, bis
-      // QUIZ_LENGTH brauchbare Fotos feststehen oder der Pool erschöpft ist.
-      // Sobald das erste brauchbare Foto feststeht, nutzt eine Wissensfrage
-      // dazu die sonst tote Wartezeit, während der Rest im Hintergrund weiterlädt.
+      // Bilderkennung Belege/Dokumente aussortieren, bis QUIZ_LENGTH
+      // brauchbare Fotos feststehen oder der Pool erschöpft ist. Mehrere
+      // Fotos werden gleichzeitig klassifiziert (CLASSIFICATION_CONCURRENCY),
+      // da das der langsamste Schritt ist. Sobald das erste brauchbare Foto
+      // feststeht, wird die Runde direkt gezeigt - der Rest lädt im
+      // Hintergrund weiter nach, während schon gespielt werden kann.
       const quizPhotos: QuizPhoto[] = [];
       let hasCheckedCuriosity = false;
+      let hasRevealedQuiz = false;
 
-      for (const candidate of shuffled) {
+      for (let i = 0; i < shuffled.length; i += CLASSIFICATION_CONCURRENCY) {
         if (quizPhotos.length >= QUIZ_LENGTH) break;
         if (!isMountedRef.current) return;
 
-        const photo = await resolvePhotoDetails(candidate);
+        const chunk = shuffled.slice(i, i + CLASSIFICATION_CONCURRENCY);
+        const resolved = await Promise.all(
+          chunk.map(async (candidate) => {
+            const photo = await resolvePhotoDetails(candidate);
+            const fotoId = await upsertPhoto(photo);
+            const labels = await classifyPhoto(fotoId, photo.uri);
+            return { photo, fotoId, labels };
+          })
+        );
         if (!isMountedRef.current) return;
 
-        const fotoId = await upsertPhoto(photo);
-        if (!isMountedRef.current) return;
+        for (const { photo, fotoId, labels } of resolved) {
+          if (quizPhotos.length >= QUIZ_LENGTH) break;
 
-        const labels = await classifyPhoto(fotoId, photo.uri);
-        if (!isMountedRef.current) return;
-        if (isJunkLabels(labels)) continue;
-        if (source.type === 'custom' && !matchesDescription(labels, source.description)) continue;
+          if (isJunkLabels(labels)) continue;
+          if (source.type === 'custom' && !matchesDescription(labels, source.description)) continue;
 
-        const [locationName, tags, memory] = await Promise.all([
-          photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
-          getPhotoTags(fotoId),
-          getMemoryForPhoto(fotoId),
-        ]);
-        if (!isMountedRef.current) return;
-
-        if (!hasCheckedCuriosity) {
-          hasCheckedCuriosity = true;
-          const question = await pickCuriosityQuestion(fotoId);
+          const [locationName, tags, memory] = await Promise.all([
+            photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
+            getPhotoTags(fotoId),
+            getMemoryForPhoto(fotoId),
+          ]);
           if (!isMountedRef.current) return;
-          if (question) {
-            setCuriosityFotoId(fotoId);
-            setCuriosityPhotoUri(photo.uri);
-            setCuriosityFromLoading(true);
-            setCuriosityQuestion(question);
-          }
-        }
 
-        quizPhotos.push({ photo, locationName, tags, memoryText: memory?.text ?? null });
+          if (!hasCheckedCuriosity) {
+            hasCheckedCuriosity = true;
+            const question = await pickCuriosityQuestion(fotoId);
+            if (!isMountedRef.current) return;
+            if (question) {
+              setCuriosityFotoId(fotoId);
+              setCuriosityPhotoUri(photo.uri);
+              setCuriosityFromLoading(true);
+              setCuriosityQuestion(question);
+            }
+          }
+
+          quizPhotos.push({ photo, locationName, tags, memoryText: memory?.text ?? null });
+
+          if (!hasRevealedQuiz) {
+            hasRevealedQuiz = true;
+            setCurrentIndex(0);
+            setSelectedOption(null);
+            setIsRevealed(false);
+            setRevealedMemory(null);
+            setScore({ correct: 0, total: 0 });
+          }
+          setPhotos([...quizPhotos]);
+        }
       }
 
       if (!isMountedRef.current) return;
-
+      setIsSearchComplete(true);
       if (quizPhotos.length === 0) {
         setPhotos([]);
-        return;
       }
-
-      setPhotos(quizPhotos);
-      setCurrentIndex(0);
-      setSelectedOption(null);
-      setIsRevealed(false);
-      setRevealedMemory(null);
-      setScore({ correct: 0, total: 0 });
     } catch (error) {
       if (!isMountedRef.current) return;
       console.error('Fotos konnten nicht geladen werden:', error);
@@ -478,7 +500,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   }
 
   const isLoading = photos === null && !errorMessage && !curiosityQuestion;
-  const isFinished = photos !== null && photos.length > 0 && currentIndex >= photos.length;
+  // Fotoende erreicht, aber der Hintergrund-Suchlauf hat noch nicht
+  // fertig durchsucht - kein "Runde fertig", sondern kurz weiter warten.
+  const isWaitingForMore =
+    photos !== null && !isSearchComplete && currentIndex >= photos.length && !curiosityQuestion;
+  const isFinished =
+    photos !== null && photos.length > 0 && currentIndex >= photos.length && isSearchComplete;
   const headingByType: Record<QuestionKind, string> = {
     WANN: 'Wann wurde dieses Foto aufgenommen?',
     WO: 'Wo wurde dieses Foto aufgenommen?',
@@ -503,12 +530,19 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && errorMessage && <Text style={styles.statusText}>{errorMessage}</Text>}
 
-        {!isLoading && !errorMessage && photos?.length === 0 && (
+        {!isLoading && !errorMessage && isSearchComplete && photos?.length === 0 && (
           <Text style={styles.statusText}>
             {source.type === 'custom'
               ? `Keine Fotos zu „${source.description}“ gefunden. Versuch es mit einer anderen Beschreibung.`
               : 'In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum, ohne Screenshots/Belege).'}
           </Text>
+        )}
+
+        {isWaitingForMore && (
+          <>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.statusText}>Weitere passende Fotos werden gesucht …</Text>
+          </>
         )}
 
         {!isLoading && !errorMessage && curiosityQuestion && curiosityPhotoUri && (
