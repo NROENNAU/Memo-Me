@@ -49,6 +49,11 @@ const QUIZ_LENGTH = 10;
 // größer als QUIZ_LENGTH, da Screenshots/Belege/Dokumente aus dem Pool
 // herausgefiltert werden, bevor QUIZ_LENGTH brauchbare Fotos feststehen.
 const FETCH_POOL_SIZE = 80;
+// Bei "Eigene Auswahl" trifft eine schmale Beschreibung (z. B. "Hundebilder")
+// oft nur einen kleinen Bruchteil der Bibliothek - ein Pool von 80 Fotos
+// enthält dann statistisch kaum ein Treffer. Deutlich größerer Pool, dafür
+// dauert das Laden hier spürbar länger (siehe LOADING_MESSAGE unten).
+const CUSTOM_FETCH_POOL_SIZE = 250;
 // Ab dieser vertikalen Strecke (in Pixeln) zählt eine Wisch-nach-oben-Geste.
 const SWIPE_UP_THRESHOLD = 60;
 
@@ -107,7 +112,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
       // (kein Ort, keine Detail-Infos).
-      const candidates = await listCandidatePhotos(source, FETCH_POOL_SIZE);
+      const poolSize = source.type === 'custom' ? CUSTOM_FETCH_POOL_SIZE : FETCH_POOL_SIZE;
+      const candidates = await listCandidatePhotos(source, poolSize);
       if (!isMountedRef.current) return;
       // Ohne Aufnahmedatum lässt sich keine "Wann"-Frage stellen. Screenshots
       // lassen sich schon anhand vorhandener Metadaten aussortieren, noch
@@ -480,6 +486,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
   };
   const headingText = question ? headingByType[question.type] : '';
+  const loadingMessage =
+    source.type === 'custom'
+      ? `Durchsuche deine Fotos nach „${source.description}“ … Das kann bei einer eigenen Auswahl etwas dauern.`
+      : 'Dein Quiz wird vorbereitet …';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -487,7 +497,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         {isLoading && (
           <>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.statusText}>Dein Quiz wird vorbereitet …</Text>
+            <Text style={styles.statusText}>{loadingMessage}</Text>
           </>
         )}
 
@@ -495,8 +505,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && photos?.length === 0 && (
           <Text style={styles.statusText}>
-            In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum,
-            ohne Screenshots/Belege).
+            {source.type === 'custom'
+              ? `Keine Fotos zu „${source.description}“ gefunden. Versuch es mit einer anderen Beschreibung.`
+              : 'In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum, ohne Screenshots/Belege).'}
           </Text>
         )}
 

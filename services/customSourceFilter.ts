@@ -97,8 +97,12 @@ function extractSearchTerms(description: string): string[] {
   const terms = new Set<string>();
   for (const word of words) {
     terms.add(word);
-    const translated = GERMAN_TO_ENGLISH[word];
-    if (translated) terms.add(translated);
+    // Teilstring-Vergleich statt exaktem Treffer, da deutsche Komposita
+    // (z. B. "Hundebilder", "Strandfotos") das Suchwort selten isoliert
+    // enthalten.
+    for (const [german, english] of Object.entries(GERMAN_TO_ENGLISH)) {
+      if (word.includes(german)) terms.add(english);
+    }
   }
   return Array.from(terms);
 }
