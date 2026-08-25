@@ -19,18 +19,21 @@ Fotos (noch nicht implementiert, siehe unten).
 | React Navigation | Navigation zwischen den Screens |
 | `expo-media-library` | Zugriff auf die Fotobibliothek des Geräts (mit Berechtigungsabfrage) |
 | `expo-location` | Reverse-Geocoding: wandelt GPS-Koordinaten eines Fotos in einen Ortsnamen um, komplett auf dem Gerät |
-| `expo-sqlite` | Lokale Datenhaltung (Fotos, Quiz-Fortschritt) – keine externe Datenbank |
+| `expo-sqlite` | Lokale Datenhaltung (Fotos, Quiz-Fortschritt, Erinnerungen, Album-Zuordnungen, Profil) – keine externe Datenbank |
 | `react-native-svg` | Kreisdiagramm im Ergebnis-Screen |
+| `expo-audio` | Aufnahme und Wiedergabe gesprochener Erinnerungen (bleibt auf dem Gerät) |
+| `expo-image-picker` | Auswahl/Aufnahme eines Profilbilds in den Einstellungen |
 
 ## Projektstruktur
 
 ```
 screens/      Ganze Bildschirme der App (z. B. der Quiz-Screen)
-components/   Wiederverwendbare UI-Bausteine (z. B. die Antwort-Auswahl)
-services/     Anbindung an native Funktionen (z. B. Fotobibliothek)
+components/   Wiederverwendbare UI-Bausteine (z. B. Antwort-Auswahl, Album-Auswahl)
+services/     Anbindung an native Funktionen (z. B. Fotobibliothek, Geocoding)
 hooks/        Wiederverwendbare React-Logik (z. B. Berechtigungs-Status)
 types/        Gemeinsame TypeScript-Datentypen
-db/           SQLite-Datenbankschema und -Initialisierung
+db/           SQLite-Datenbankschema, -Initialisierung und Repositories
+design/       Mockups als Stil-Referenz für Farben, Typografie und Layout
 ```
 
 ## Setup & Ausführen
@@ -67,7 +70,8 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 ## Aktueller Stand
 
 - ✅ Expo-TypeScript-Projekt mit sauberer Ordnerstruktur
-- ✅ SQLite-Datenbankschema für Fotos (`Fotos`) und Quiz-Ergebnisse (`QuizErgebnisse`)
+- ✅ SQLite-Datenbankschema für Fotos (`Fotos`), Quiz-Ergebnisse (`QuizErgebnisse`),
+  Erinnerungen (`Erinnerungen`), Album-Zuordnungen (`FotoAlben`) und Profil (`Profil`)
 - ✅ Gemeinsame Design-Grundlage (`theme/`) mit Farben, Schriften und Abständen aus den Mockups
 - ✅ Willkommens-Bildschirm (`OnboardingScreen`) mit Privacy-Hinweis und Berechtigungsabfrage,
   inklusive verständlichem Hinweis, falls der Zugriff abgelehnt wurde
@@ -77,9 +81,16 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
   statt Koordinaten via Reverse-Geocoding, Ergebnisse werden in `QuizErgebnisse` gespeichert
 - ✅ Gestensteuerung statt Buttons: Antwort löst sich beim Antippen sofort auf, nach oben
   wischen geht zum nächsten Foto
+- ✅ Erinnerungs-Eingabe (`MemoryPrompt`) zu einem Foto: Text oder Sprachnachricht über eine
+  Chat-Stil-Eingabezeile mit Mikro-Button, wird bei einer späteren Antwort wieder angezeigt
+- ✅ Foto-Organisation nach dem Beantworten einer Frage: Foto löschen oder einem Album
+  zuordnen (inkl. Vorschlag, neues Album anzulegen, und Erkennung bereits bestehender
+  Album-Zuordnungen), Fotos werden dabei über ihre stabile Asset-ID identifiziert
+- ✅ Einstellungen-Screen (`SettingsScreen`) für Spitzname und Profilbild
 - ✅ Ergebnis-Screen mit Kreisdiagramm nach Abschluss einer Runde, plus "Nochmal spielen"
   und "Anderes Quiz starten"
-- ✅ Navigation: Onboarding nur beim ersten Mal, danach Fotoquelle → Quiz → Ergebnis
+- ✅ Navigation: Onboarding nur beim ersten Mal, danach Fotoquelle → Quiz → Ergebnis,
+  Einstellungen als Modal erreichbar
 
 ## Design
 
