@@ -26,52 +26,68 @@ interface Tile {
 
 export function PhotoSourceScreen({ navigation }: Props) {
   const [tiles, setTiles] = useState<Tile[] | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
 
     async function load() {
-      const [recentCount, recentCover, lastYearCount, lastYearCover, albums] = await Promise.all([
-        countPhotosForSource({ type: 'recent' }),
-        getCoverPhotoUri({ type: 'recent' }),
-        countPhotosForSource({ type: 'lastYear' }),
-        getCoverPhotoUri({ type: 'lastYear' }),
-        getAlbums(),
-      ]);
-      if (!isActive) return;
+      try {
+        // Letzte Fotos/Letztes Jahr sofort anzeigen, statt auf die
+        // Album-Vorschauen zu warten.
+        const [recentCount, recentCover, lastYearCount, lastYearCover] = await Promise.all([
+          countPhotosForSource({ type: 'recent' }),
+          getCoverPhotoUri({ type: 'recent' }),
+          countPhotosForSource({ type: 'lastYear' }),
+          getCoverPhotoUri({ type: 'lastYear' }),
+        ]);
+        if (!isActive) return;
 
-      const albumTiles = await Promise.all(
-        albums.map(async (album): Promise<Tile> => {
+        setTiles([
+          {
+            key: 'recent',
+            title: 'Letzte Fotos',
+            subtitle: `${recentCount} verfügbar`,
+            coverUri: recentCover,
+            source: { type: 'recent' },
+          },
+          {
+            key: 'lastYear',
+            title: 'Letztes Jahr',
+            subtitle: `${lastYearCount} verfügbar`,
+            coverUri: lastYearCover,
+            source: { type: 'lastYear' },
+          },
+        ]);
+
+        // Album-Vorschauen nacheinander statt parallel nachladen - bei
+        // vielen Alben würde eine parallele Abfrage die Mediathek
+        // überlasten und den Screen einfrieren lassen. Jede fertige Kachel
+        // erscheint sofort, statt auf alle Alben zu warten.
+        const albums = await getAlbums();
+        if (!isActive) return;
+
+        for (const album of albums) {
+          if (!isActive) return;
           const source: PhotoSource = { type: 'album', albumId: album.id, albumTitle: album.title };
           const coverUri = await getCoverPhotoUri(source);
-          return {
-            key: `album-${album.id}`,
-            title: album.title,
-            subtitle: `${album.assetCount} Fotos`,
-            coverUri,
-            source,
-          };
-        })
-      );
-      if (!isActive) return;
-
-      setTiles([
-        {
-          key: 'recent',
-          title: 'Letzte Fotos',
-          subtitle: `${recentCount} verfügbar`,
-          coverUri: recentCover,
-          source: { type: 'recent' },
-        },
-        {
-          key: 'lastYear',
-          title: 'Letztes Jahr',
-          subtitle: `${lastYearCount} verfügbar`,
-          coverUri: lastYearCover,
-          source: { type: 'lastYear' },
-        },
-        ...albumTiles,
-      ]);
+          if (!isActive) return;
+          setTiles((previous) => [
+            ...(previous ?? []),
+            {
+              key: `album-${album.id}`,
+              title: album.title,
+              subtitle: `${album.assetCount} Fotos`,
+              coverUri,
+              source,
+            },
+          ]);
+        }
+      } catch (error) {
+        if (!isActive) return;
+        console.error('Erinnerungsdeck konnte nicht geladen werden:', error);
+        setErrorMessage('Deine Fotoquellen konnten nicht geladen werden.');
+      }
     }
 
     load();
@@ -101,9 +117,11 @@ export function PhotoSourceScreen({ navigation }: Props) {
           </Pressable>
         </View>
 
-        {!tiles && <ActivityIndicator color={colors.primary} style={styles.loadingIndicator} />}
+        {errorMessage && <Text style={styles.statusText}>{errorMessage}</Text>}
 
-        {tiles && (
+        {!errorMessage && !tiles && <ActivityIndicator color={colors.primary} style={styles.loadingIndicator} />}
+
+        {!errorMessage && tiles && (
           <View style={styles.grid}>
             {tiles.map((tile) => (
               <SourceTile
@@ -143,6 +161,10 @@ const styles = StyleSheet.create({
   },
   loadingIndicator: {
     marginTop: spacing.xl,
+  },
+  statusText: {
+    ...typography.body,
+    color: colors.textSecondary,
   },
   grid: {
     flexDirection: 'row',
