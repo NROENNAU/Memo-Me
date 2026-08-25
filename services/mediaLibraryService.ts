@@ -128,6 +128,13 @@ export async function listCandidatePhotos(source: PhotoSource, limit: number): P
   return buckets.flatMap(({ assets }) => shuffle(assets).slice(0, perBucket).map(toCandidatePhoto));
 }
 
+// Liefert das neueste Foto einer Quelle als Vorschaubild (z. B. für die
+// Kacheln im Erinnerungsdeck) - oder null, wenn die Quelle leer ist.
+export async function getCoverPhotoUri(source: PhotoSource): Promise<string | null> {
+  const { assets } = await MediaLibrary.getAssetsAsync(optionsForSource(source, 1));
+  return assets[0]?.uri ?? null;
+}
+
 // Lädt die vollständigen Metadaten (u. a. GPS-Ort) für ein einzelnes Foto
 // nach. Bewusst pro Foto statt für den ganzen Pool, damit nur die tatsächlich
 // für die Quizrunde ausgewählten Fotos diesen teureren Aufruf durchlaufen.
