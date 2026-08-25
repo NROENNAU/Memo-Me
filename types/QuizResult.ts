@@ -1,5 +1,6 @@
-// Die drei Fragetypen im Quiz: Wann, Wo, Wer wurde das Foto aufgenommen.
-export type QuestionType = 'WANN' | 'WO' | 'WER';
+// Die Fragetypen im Quiz: Wann/Wo/Wer wurde das Foto aufgenommen, oder
+// welche Erinnerung passt zu diesem Foto.
+export type QuestionType = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
 
 // Ergebnis einer einzelnen beantworteten Quizfrage, wie es in der SQLite-Tabelle "QuizErgebnisse" landet.
 export interface QuizResult {

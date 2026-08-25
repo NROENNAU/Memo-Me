@@ -1,5 +1,7 @@
-// Erzeugt Quizfragen aus einem Foto: "Wann" (Aufnahmejahr) und "Wo"
-// (Ortsname), jeweils mit drei plausiblen, aber falschen Optionen.
+// Erzeugt Quizfragen aus einem Foto: "Wann" (Aufnahmejahr), "Wo" (Ortsname),
+// "Wer" (hinterlegte Personen-Tags) und "Erinnerung" (welche selbst erzählte
+// Geschichte zu diesem Foto gehört) - jeweils mit drei plausiblen, aber
+// falschen Optionen.
 import { LibraryPhoto } from '../types/Photo';
 
 export interface WannQuestion {
@@ -9,6 +11,16 @@ export interface WannQuestion {
 
 export interface WoQuestion {
   correctPlace: string;
+  options: string[];
+}
+
+export interface WerQuestion {
+  correctName: string;
+  options: string[];
+}
+
+export interface ErinnerungQuestion {
+  correctText: string;
   options: string[];
 }
 
@@ -27,6 +39,10 @@ const FALLBACK_PLACES = [
   'Amsterdam, Niederlande',
   'Zürich, Schweiz',
 ];
+
+// Auffüller für die "Wer"-Frage, falls die Runde noch zu wenige echte
+// Personen-Tags aus anderen Fotos für plausible Ablenker enthält.
+const FALLBACK_NAMES = ['Anna', 'Max', 'Lisa', 'Tom', 'Sophie', 'Paul', 'Julia', 'Ben'];
 
 export function shuffle<T>(items: T[]): T[] {
   const result = [...items];
@@ -66,4 +82,49 @@ export function buildWoQuestion(correctPlace: string | null, otherPlaces: string
 
   const wrongPlaces = shuffle(distractorPool).slice(0, 3);
   return { correctPlace, options: shuffle([correctPlace, ...wrongPlaces]) };
+}
+
+// Baut die "Wer"-Frage aus den zu einem Foto hinterlegten Personen-Tags
+// (siehe curiosityService). Ablenker kommen zuerst aus den Tags anderer
+// Fotos der Runde, bei Bedarf aufgefüllt mit plausiblen Platzhalternamen.
+// Gibt null zurück, wenn das Foto noch keine Personen-Tags hat.
+export function buildWerQuestion(correctNames: string[] | null, otherNames: string[]): WerQuestion | null {
+  if (!correctNames || correctNames.length === 0) return null;
+  const correctName = correctNames[0];
+
+  const realDistractors = otherNames.filter((name) => !correctNames.includes(name));
+  const fallbackDistractors = FALLBACK_NAMES.filter((name) => !correctNames.includes(name));
+  const distractorPool = Array.from(new Set([...realDistractors, ...fallbackDistractors]));
+
+  const wrongNames = shuffle(distractorPool).slice(0, 3);
+  return { correctName, options: shuffle([correctName, ...wrongNames]) };
+}
+
+// Die Antwort-Buttons sind für kurze Antworten (Jahr, Ort, Name) gebaut,
+// nicht für ganze Erinnerungstexte - deshalb wird auf eine lesbare Länge
+// gekürzt, bevor eine Erinnerung als Option angezeigt wird.
+const MAX_ERINNERUNG_PREVIEW_LENGTH = 40;
+
+function previewErinnerungText(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.length > MAX_ERINNERUNG_PREVIEW_LENGTH
+    ? `${trimmed.slice(0, MAX_ERINNERUNG_PREVIEW_LENGTH - 1)}…`
+    : trimmed;
+}
+
+// Baut eine Frage aus der zu einem Foto erzählten Erinnerung: welche der
+// vier Geschichten passt zu diesem Foto? Nutzt bewusst nur echte Erinnerungen
+// anderer Fotos als Ablenker (keine erfundenen Platzhalter-Geschichten) -
+// deshalb null, wenn die Runde noch keine drei anderen Erinnerungen enthält.
+export function buildErinnerungQuestion(correctText: string | null, otherTexts: string[]): ErinnerungQuestion | null {
+  if (!correctText) return null;
+  const correctPreview = previewErinnerungText(correctText);
+
+  const distractorPool = Array.from(
+    new Set(otherTexts.map(previewErinnerungText).filter((text) => text !== correctPreview))
+  );
+  if (distractorPool.length < 3) return null;
+
+  const wrongTexts = shuffle(distractorPool).slice(0, 3);
+  return { correctText: correctPreview, options: shuffle([correctPreview, ...wrongTexts]) };
 }

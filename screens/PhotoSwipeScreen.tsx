@@ -24,10 +24,16 @@ import {
   resolvePhotoDetails,
 } from '../services/mediaLibraryService';
 import { reverseGeocode } from '../services/locationService';
-import { buildWannQuestion, buildWoQuestion, shuffle } from '../services/quizService';
+import {
+  buildErinnerungQuestion,
+  buildWannQuestion,
+  buildWerQuestion,
+  buildWoQuestion,
+  shuffle,
+} from '../services/quizService';
 import { isJunkPhoto, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
-import { upsertPhoto, savePhotoTags } from '../db/photoRepository';
+import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
 import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
@@ -48,11 +54,17 @@ const SWIPE_UP_THRESHOLD = 60;
 interface QuizPhoto {
   photo: LibraryPhoto;
   locationName: string | null;
+  tags: string[] | null;
+  memoryText: string | null;
 }
 
-type Question =
-  | { type: 'WANN'; options: string[]; correctOption: string }
-  | { type: 'WO'; options: string[]; correctOption: string };
+type QuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
+
+interface Question {
+  type: QuestionKind;
+  options: string[];
+  correctOption: string;
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
@@ -66,6 +78,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [curiosityQuestion, setCuriosityQuestion] = useState<CuriosityQuestion | null>(null);
   const [curiosityFotoId, setCuriosityFotoId] = useState<number | null>(null);
+  const [curiosityPhotoUri, setCuriosityPhotoUri] = useState<string | null>(null);
+  // Unterscheidet die Zwischenfrage während des Ladens (nutzt die sonst tote
+  // Wartezeit, siehe loadQuiz) von der Zwischenfrage während des laufenden
+  // Quiz (siehe goToNextPhoto) - entscheidet, ob nach der Antwort der
+  // Fotoindex weiterspringen muss oder nicht.
+  const [curiosityFromLoading, setCuriosityFromLoading] = useState(false);
   const [revealedMemory, setRevealedMemory] = useState<Memory | null>(null);
   const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
   const [currentAlbum, setCurrentAlbum] = useState<AlbumAssignment | null>(null);
@@ -82,6 +100,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setPhotos(null);
     setCuriosityQuestion(null);
     setCuriosityFotoId(null);
+    setCuriosityPhotoUri(null);
     setErrorMessage(null);
 
     try {
@@ -107,7 +126,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
       // Bilderkennung Belege/Dokumente aussortieren - nacheinander, bis
       // QUIZ_LENGTH brauchbare Fotos feststehen oder der Pool erschöpft ist.
+      // Sobald das erste brauchbare Foto feststeht, nutzt eine Wissensfrage
+      // dazu die sonst tote Wartezeit, während der Rest im Hintergrund weiterlädt.
       const quizPhotos: QuizPhoto[] = [];
+      let hasCheckedCuriosity = false;
 
       for (const candidate of shuffled) {
         if (quizPhotos.length >= QUIZ_LENGTH) break;
@@ -122,9 +144,26 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         if (await isJunkPhoto(fotoId, photo.uri)) continue;
         if (!isMountedRef.current) return;
 
-        const locationName = photo.coordinates ? await reverseGeocode(photo.coordinates) : null;
+        const [locationName, tags, memory] = await Promise.all([
+          photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
+          getPhotoTags(fotoId),
+          getMemoryForPhoto(fotoId),
+        ]);
         if (!isMountedRef.current) return;
-        quizPhotos.push({ photo, locationName });
+
+        if (!hasCheckedCuriosity) {
+          hasCheckedCuriosity = true;
+          const question = await pickCuriosityQuestion(fotoId);
+          if (!isMountedRef.current) return;
+          if (question) {
+            setCuriosityFotoId(fotoId);
+            setCuriosityPhotoUri(photo.uri);
+            setCuriosityFromLoading(true);
+            setCuriosityQuestion(question);
+          }
+        }
+
+        quizPhotos.push({ photo, locationName, tags, memoryText: memory?.text ?? null });
       }
 
       if (!isMountedRef.current) return;
@@ -153,19 +192,38 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   const currentItem = photos?.[currentIndex] ?? null;
 
-  // Wechselt pro Foto zwischen "Wann" und "Wo". Lässt sich eine Wo-Frage
-  // nicht bilden (kein Ort bekannt), wird stattdessen die Wann-Frage gestellt.
+  // Wählt zufällig aus den Fragetypen, die sich für das aktuelle Foto
+  // tatsächlich bilden lassen (Wer/Erinnerung brauchen entsprechende Daten
+  // zu diesem Foto) - so variiert die Art der Frage, statt starr zwischen
+  // Wann und Wo zu wechseln. Wann geht immer und dient als letzter Rückfall.
   const question: Question | null = useMemo(() => {
     if (!currentItem || !photos) return null;
 
-    const preferWo = currentIndex % 2 === 1;
-    if (preferWo) {
-      const otherPlaces = photos
-        .filter((_, index) => index !== currentIndex)
-        .map((item) => item.locationName)
-        .filter((place): place is string => place !== null);
-      const wo = buildWoQuestion(currentItem.locationName, otherPlaces);
-      if (wo) return { type: 'WO', options: wo.options, correctOption: wo.correctPlace };
+    const others = photos.filter((_, index) => index !== currentIndex);
+
+    const builders: Array<() => Question | null> = [
+      () => {
+        const otherPlaces = others.map((item) => item.locationName).filter((place): place is string => place !== null);
+        const wo = buildWoQuestion(currentItem.locationName, otherPlaces);
+        return wo ? { type: 'WO', options: wo.options, correctOption: wo.correctPlace } : null;
+      },
+      () => {
+        const otherNames = others.flatMap((item) => item.tags ?? []);
+        const wer = buildWerQuestion(currentItem.tags, otherNames);
+        return wer ? { type: 'WER', options: wer.options, correctOption: wer.correctName } : null;
+      },
+      () => {
+        const otherTexts = others.map((item) => item.memoryText).filter((text): text is string => text !== null);
+        const erinnerung = buildErinnerungQuestion(currentItem.memoryText, otherTexts);
+        return erinnerung
+          ? { type: 'ERINNERUNG', options: erinnerung.options, correctOption: erinnerung.correctText }
+          : null;
+      },
+    ];
+
+    for (const build of shuffle(builders)) {
+      const built = build();
+      if (built) return built;
     }
 
     const wann = buildWannQuestion(currentItem.photo);
@@ -231,6 +289,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         if (!isMountedRef.current) return;
         if (question) {
           setCuriosityFotoId(fotoId);
+          setCuriosityPhotoUri(finishedItem.photo.uri);
+          setCuriosityFromLoading(false);
           setCuriosityQuestion(question);
           return;
         }
@@ -260,15 +320,23 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         }
       }
     }
+    const wasFromLoading = curiosityFromLoading;
     setCuriosityQuestion(null);
     setCuriosityFotoId(null);
-    setCurrentIndex((index) => index + 1);
+    setCuriosityPhotoUri(null);
+    if (!wasFromLoading) {
+      setCurrentIndex((index) => index + 1);
+    }
   }
 
   function handleCuriositySkip() {
+    const wasFromLoading = curiosityFromLoading;
     setCuriosityQuestion(null);
     setCuriosityFotoId(null);
-    setCurrentIndex((index) => index + 1);
+    setCuriosityPhotoUri(null);
+    if (!wasFromLoading) {
+      setCurrentIndex((index) => index + 1);
+    }
   }
 
   // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
@@ -400,10 +468,15 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     navigation.replace('PhotoSource');
   }
 
-  const isLoading = photos === null && !errorMessage;
+  const isLoading = photos === null && !errorMessage && !curiosityQuestion;
   const isFinished = photos !== null && photos.length > 0 && currentIndex >= photos.length;
-  const headingText =
-    question?.type === 'WO' ? 'Wo wurde dieses Foto aufgenommen?' : 'Wann wurde dieses Foto aufgenommen?';
+  const headingByType: Record<QuestionKind, string> = {
+    WANN: 'Wann wurde dieses Foto aufgenommen?',
+    WO: 'Wo wurde dieses Foto aufgenommen?',
+    WER: 'Wer ist auf diesem Foto zu sehen?',
+    ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
+  };
+  const headingText = question ? headingByType[question.type] : '';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -424,9 +497,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           </Text>
         )}
 
-        {!isLoading && !errorMessage && curiosityQuestion && currentItem && (
+        {!isLoading && !errorMessage && curiosityQuestion && curiosityPhotoUri && (
           <CuriosityPrompt
-            photoUri={currentItem.photo.uri}
+            photoUri={curiosityPhotoUri}
             heading={curiosityQuestion.heading}
             subtitle={curiosityQuestion.subtitle}
             placeholder={curiosityQuestion.placeholder}
@@ -498,7 +571,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
               isRevealed={isRevealed}
               onSelect={handleSelectAnswer}
             />
-            {isRevealed && revealedMemory && (
+            {isRevealed && question.type !== 'ERINNERUNG' && revealedMemory && (
               <View style={styles.memoryBox}>
                 {revealedMemory.text && <Text style={styles.memoryText}>📝 {revealedMemory.text}</Text>}
                 {revealedMemory.audioUri && <AudioPlayButton uri={revealedMemory.audioUri} />}
