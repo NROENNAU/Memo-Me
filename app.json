@@ -49,6 +49,11 @@
           "microphonePermission": "Memo-Me nutzt das Mikrofon nur, um deine gesprochenen Erinnerungen zu einem Foto aufzunehmen. Die Aufnahme bleibt auf deinem Gerät."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "365c02da-7caf-4fca-b4c0-f7a87d92b552"
+      }
+    }
   }
 }
