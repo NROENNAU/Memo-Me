@@ -2,7 +2,8 @@
 // mit der "Wann"- und der "Wo"-Frage (Mehrfachauswahl aus vier Optionen).
 // Antworten lösen sich beim Antippen sofort auf; weiter geht es per
 // Wisch-Geste nach oben (kein Bestätigen-/Überspringen-Button mehr).
-// Die Wer-Frage folgt in einem späteren Schritt (braucht erst Personen-Tags).
+// Zwischendurch schiebt curiosityService an zufälligen Punkten eine kurze
+// Wissensfrage zum aktuellen Foto ein (siehe goToNextPhoto).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,7 +12,7 @@ import { Image } from 'expo-image';
 import { AlbumPickerModal } from '../components/AlbumPickerModal';
 import { AnswerOptions } from '../components/AnswerOptions';
 import { AudioPlayButton } from '../components/AudioPlayButton';
-import { MemoryPrompt } from '../components/MemoryPrompt';
+import { CuriosityPrompt } from '../components/CuriosityPrompt';
 import { PhotoActions } from '../components/PhotoActions';
 import { ScoreRing } from '../components/ScoreRing';
 import {
@@ -25,7 +26,8 @@ import {
 import { reverseGeocode } from '../services/locationService';
 import { buildWannQuestion, buildWoQuestion, shuffle } from '../services/quizService';
 import { isJunkPhoto, isLikelyScreenshot } from '../services/junkPhotoFilter';
-import { upsertPhoto } from '../db/photoRepository';
+import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
+import { upsertPhoto, savePhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
 import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
@@ -62,9 +64,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [isRevealed, setIsRevealed] = useState(false);
   const [score, setScore] = useState({ correct: 0, total: 0 });
-  const [promptPhotoUri, setPromptPhotoUri] = useState<string | null>(null);
-  const [memoryPromptFotoId, setMemoryPromptFotoId] = useState<number | null>(null);
-  const [isPromptDone, setIsPromptDone] = useState(false);
+  const [curiosityQuestion, setCuriosityQuestion] = useState<CuriosityQuestion | null>(null);
+  const [curiosityFotoId, setCuriosityFotoId] = useState<number | null>(null);
   const [revealedMemory, setRevealedMemory] = useState<Memory | null>(null);
   const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
   const [currentAlbum, setCurrentAlbum] = useState<AlbumAssignment | null>(null);
@@ -79,9 +80,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   const loadQuiz = useCallback(async () => {
     setPhotos(null);
-    setPromptPhotoUri(null);
-    setMemoryPromptFotoId(null);
-    setIsPromptDone(false);
+    setCuriosityQuestion(null);
+    setCuriosityFotoId(null);
     setErrorMessage(null);
 
     try {
@@ -101,17 +101,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
       if (shuffled.length === 0) {
         setPhotos([]);
-        setIsPromptDone(true);
         return;
       }
 
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
       // Bilderkennung Belege/Dokumente aussortieren - nacheinander, bis
       // QUIZ_LENGTH brauchbare Fotos feststehen oder der Pool erschöpft ist.
-      // Die Erinnerungs-Frage erscheint für das erste brauchbare Foto, sobald
-      // es feststeht - erst ab da ist sicher, dass es tatsächlich im Quiz landet.
       const quizPhotos: QuizPhoto[] = [];
-      let hasShownMemoryPrompt = false;
 
       for (const candidate of shuffled) {
         if (quizPhotos.length >= QUIZ_LENGTH) break;
@@ -126,18 +122,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         if (await isJunkPhoto(fotoId, photo.uri)) continue;
         if (!isMountedRef.current) return;
 
-        if (!hasShownMemoryPrompt) {
-          hasShownMemoryPrompt = true;
-          const existingMemory = await getMemoryForPhoto(fotoId);
-          if (!isMountedRef.current) return;
-          if (existingMemory) {
-            setIsPromptDone(true);
-          } else {
-            setMemoryPromptFotoId(fotoId);
-            setPromptPhotoUri(photo.uri);
-          }
-        }
-
         const locationName = photo.coordinates ? await reverseGeocode(photo.coordinates) : null;
         if (!isMountedRef.current) return;
         quizPhotos.push({ photo, locationName });
@@ -147,7 +131,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
       if (quizPhotos.length === 0) {
         setPhotos([]);
-        setIsPromptDone(true);
         return;
       }
 
@@ -230,24 +213,62 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     };
   }, [currentItem]);
 
-  function goToNextPhoto() {
+  // Wechselt zum nächsten Foto - schiebt aber zuvor mit einer gewissen
+  // Wahrscheinlichkeit eine kurze Wissensfrage zum gerade gezeigten Foto ein
+  // (siehe curiosityService). Nur wenn dazu tatsächlich etwas fehlt, wird
+  // auch wirklich gefragt.
+  async function goToNextPhoto() {
+    const finishedItem = currentItem;
     setSelectedOption(null);
     setIsRevealed(false);
     setRevealedMemory(null);
+
+    if (finishedItem && shouldInterject()) {
+      try {
+        const fotoId = await upsertPhoto(finishedItem.photo);
+        if (!isMountedRef.current) return;
+        const question = await pickCuriosityQuestion(fotoId);
+        if (!isMountedRef.current) return;
+        if (question) {
+          setCuriosityFotoId(fotoId);
+          setCuriosityQuestion(question);
+          return;
+        }
+      } catch (error) {
+        console.error('Wissensfrage konnte nicht vorbereitet werden:', error);
+      }
+    }
+
     setCurrentIndex((index) => index + 1);
   }
 
-  function handleMemorySubmit(memory: { text: string | null; audioUri: string | null }) {
-    if (memoryPromptFotoId !== null) {
-      saveMemory(memoryPromptFotoId, memory).catch((error) => {
-        console.error('Erinnerung konnte nicht gespeichert werden:', error);
-      });
+  function handleCuriositySubmit(answer: { text: string | null; audioUri: string | null }) {
+    if (curiosityFotoId !== null && curiosityQuestion) {
+      if (curiosityQuestion.kind === 'story') {
+        saveMemory(curiosityFotoId, answer).catch((error) => {
+          console.error('Erinnerung konnte nicht gespeichert werden:', error);
+        });
+      } else if (curiosityQuestion.kind === 'who' && answer.text) {
+        const names = answer.text
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean);
+        if (names.length > 0) {
+          savePhotoTags(curiosityFotoId, names).catch((error) => {
+            console.error('Namen konnten nicht gespeichert werden:', error);
+          });
+        }
+      }
     }
-    setIsPromptDone(true);
+    setCuriosityQuestion(null);
+    setCuriosityFotoId(null);
+    setCurrentIndex((index) => index + 1);
   }
 
-  function handleMemorySkip() {
-    setIsPromptDone(true);
+  function handleCuriositySkip() {
+    setCuriosityQuestion(null);
+    setCuriosityFotoId(null);
+    setCurrentIndex((index) => index + 1);
   }
 
   // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
@@ -343,19 +364,28 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     }
   }
 
-  // Wisch-nach-oben-Geste: nur aktiv, nachdem die Antwort aufgelöst wurde
-  // (isRevealedRef vermeidet einen veralteten Stand in den Gesten-Callbacks).
+  // Wisch-nach-oben-Geste: nur aktiv, nachdem die Antwort aufgelöst wurde und
+  // solange keine Wissensfrage eingeblendet ist (die Refs vermeiden einen
+  // veralteten Stand in den Gesten-Callbacks).
   const isRevealedRef = useRef(isRevealed);
   useEffect(() => {
     isRevealedRef.current = isRevealed;
   }, [isRevealed]);
 
+  const isCuriosityActiveRef = useRef(false);
+  useEffect(() => {
+    isCuriosityActiveRef.current = curiosityQuestion !== null;
+  }, [curiosityQuestion]);
+
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gestureState) =>
-        isRevealedRef.current && -gestureState.dy > Math.abs(gestureState.dx) && -gestureState.dy > 10,
+        isRevealedRef.current &&
+        !isCuriosityActiveRef.current &&
+        -gestureState.dy > Math.abs(gestureState.dx) &&
+        -gestureState.dy > 10,
       onPanResponderRelease: (_, gestureState) => {
-        if (isRevealedRef.current && -gestureState.dy > SWIPE_UP_THRESHOLD) {
+        if (isRevealedRef.current && !isCuriosityActiveRef.current && -gestureState.dy > SWIPE_UP_THRESHOLD) {
           goToNextPhoto();
         }
       },
@@ -370,9 +400,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     navigation.replace('PhotoSource');
   }
 
-  const showMemoryPrompt = promptPhotoUri !== null && !isPromptDone;
-  const isLoading = photos === null && !errorMessage && !showMemoryPrompt;
-  const loadingMessage = isPromptDone ? 'Fast fertig …' : 'Dein Quiz wird vorbereitet …';
+  const isLoading = photos === null && !errorMessage;
   const isFinished = photos !== null && photos.length > 0 && currentIndex >= photos.length;
   const headingText =
     question?.type === 'WO' ? 'Wo wurde dieses Foto aufgenommen?' : 'Wann wurde dieses Foto aufgenommen?';
@@ -383,7 +411,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         {isLoading && (
           <>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.statusText}>{loadingMessage}</Text>
+            <Text style={styles.statusText}>Dein Quiz wird vorbereitet …</Text>
           </>
         )}
 
@@ -396,15 +424,19 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           </Text>
         )}
 
-        {!isLoading && !errorMessage && showMemoryPrompt && promptPhotoUri && (
-          <MemoryPrompt
-            photoUri={promptPhotoUri}
-            onSubmit={handleMemorySubmit}
-            onSkip={handleMemorySkip}
+        {!isLoading && !errorMessage && curiosityQuestion && currentItem && (
+          <CuriosityPrompt
+            photoUri={currentItem.photo.uri}
+            heading={curiosityQuestion.heading}
+            subtitle={curiosityQuestion.subtitle}
+            placeholder={curiosityQuestion.placeholder}
+            allowVoice={curiosityQuestion.allowVoice}
+            onSubmit={handleCuriositySubmit}
+            onSkip={handleCuriositySkip}
           />
         )}
 
-        {!isLoading && !errorMessage && !showMemoryPrompt && isFinished && (
+        {!isLoading && !errorMessage && !curiosityQuestion && isFinished && (
           <>
             <Text style={styles.heading}>Großartig!</Text>
             <Text style={styles.statusText}>Du hast das Quiz abgeschlossen.</Text>
@@ -428,7 +460,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           </>
         )}
 
-        {!isLoading && !errorMessage && !showMemoryPrompt && !isFinished && currentItem && question && (
+        {!isLoading && !errorMessage && !curiosityQuestion && !isFinished && currentItem && question && (
           <>
             {isRevealed ? (
               <PhotoActions

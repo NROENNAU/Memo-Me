@@ -46,3 +46,19 @@ export async function upsertPhoto(photo: PhotoForUpsert): Promise<number> {
   );
   return result.lastInsertRowId;
 }
+
+// Liest die zu einem Foto hinterlegten Personen/Schlagwörter, falls vorhanden.
+export async function getPhotoTags(fotoId: number): Promise<string[] | null> {
+  const db = getDatabase();
+  const row = await db.getFirstAsync<{ tags: string | null }>('SELECT tags FROM Fotos WHERE id = ?', fotoId);
+  if (!row?.tags) return null;
+  const parsed = JSON.parse(row.tags);
+  return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+}
+
+// Speichert Personen/Schlagwörter zu einem Foto (z. B. Antwort auf "Wer ist
+// das?"). Grundlage für eine spätere "Wer"-Frage im Quiz.
+export async function savePhotoTags(fotoId: number, tags: string[]): Promise<void> {
+  const db = getDatabase();
+  await db.runAsync('UPDATE Fotos SET tags = ? WHERE id = ?', JSON.stringify(tags), fotoId);
+}

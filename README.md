@@ -23,6 +23,7 @@ Fotos (noch nicht implementiert, siehe unten).
 | `react-native-svg` | Kreisdiagramm im Ergebnis-Screen |
 | `expo-audio` | Aufnahme und Wiedergabe gesprochener Erinnerungen (bleibt auf dem Gerät) |
 | `expo-image-picker` | Auswahl/Aufnahme eines Profilbilds in den Einstellungen |
+| `modules/image-classifier` (lokales Modul) | On-device Bildklassifikation (Apple Vision auf iOS, Google ML Kit auf Android) zum Aussortieren von Screenshots/Belegen, kein eigenes Modell, kein Netzwerkzugriff |
 
 ## Projektstruktur
 
@@ -71,18 +72,24 @@ Tunnel-Dienste wie ngrok/Cloudflare Tunnel grundsätzlich.
 
 - ✅ Expo-TypeScript-Projekt mit sauberer Ordnerstruktur
 - ✅ SQLite-Datenbankschema für Fotos (`Fotos`), Quiz-Ergebnisse (`QuizErgebnisse`),
-  Erinnerungen (`Erinnerungen`), Album-Zuordnungen (`FotoAlben`) und Profil (`Profil`)
+  Erinnerungen (`Erinnerungen`), Album-Zuordnungen (`FotoAlben`), Profil (`Profil`) und
+  einen Cache für die Bildklassifikation (`FotoKlassifikation`)
 - ✅ Gemeinsame Design-Grundlage (`theme/`) mit Farben, Schriften und Abständen aus den Mockups
 - ✅ Willkommens-Bildschirm (`OnboardingScreen`) mit Privacy-Hinweis und Berechtigungsabfrage,
   inklusive verständlichem Hinweis, falls der Zugriff abgelehnt wurde
 - ✅ Fotoquellen-Auswahl (`PhotoSourceScreen`, "Dein Erinnerungsdeck"): letzte Fotos,
-  letztes Jahr oder ein eigenes Album als Quiz-Pool
+  letztes Jahr oder ein eigenes Album als Quiz-Pool – eine Quelle muss aktiv gewählt werden
+- ✅ Der Fotopool für eine Runde wird über den gesamten Zeitraum der Quelle durchmischt
+  (nicht nur die neuesten Fotos) und schließt Screenshots (Metadaten) sowie Belege/Dokumente
+  (on-device Bildklassifikation, siehe `modules/image-classifier`) automatisch aus
 - ✅ Echte Quiz-Logik: Wann- und Wo-Frage (Mehrfachauswahl, wechselt pro Foto), Ortsnamen
   statt Koordinaten via Reverse-Geocoding, Ergebnisse werden in `QuizErgebnisse` gespeichert
 - ✅ Gestensteuerung statt Buttons: Antwort löst sich beim Antippen sofort auf, nach oben
   wischen geht zum nächsten Foto
-- ✅ Erinnerungs-Eingabe (`MemoryPrompt`) zu einem Foto: Text oder Sprachnachricht über eine
-  Chat-Stil-Eingabezeile mit Mikro-Button, wird bei einer späteren Antwort wieder angezeigt
+- ✅ Wissensfragen zwischendurch (`CuriosityPrompt`, `services/curiosityService.ts`): an
+  zufälligen Punkten im Quiz fragt die App etwas zum gerade gezeigten Foto - welche Frage
+  das ist (Geschichte/Name oder "Wer ist zu sehen?"), entscheidet sie danach, was zu diesem
+  Foto noch fehlt. Antworten landen als Erinnerung bzw. als Personen-Tag am Foto
 - ✅ Foto-Organisation nach dem Beantworten einer Frage: Foto löschen oder einem Album
   zuordnen (inkl. Vorschlag, neues Album anzulegen, und Erkennung bereits bestehender
   Album-Zuordnungen), Fotos werden dabei über ihre stabile Asset-ID identifiziert
@@ -101,7 +108,8 @@ abgeleiteten Farb- und Schriftwerte stehen zentral in [`theme/`](./theme/).
 
 ## Was als Nächstes kommt
 
-- Wer-Frage (braucht erst eine Funktion zum Markieren von Personen auf Fotos)
+- Echte Wer-Frage im Quiz, sobald genug Fotos über die Wissensfragen zwischendurch
+  Personen-Tags gesammelt haben
 - Wikimedia-"On this day"-Integration für historische Fakten
 - On-Device-Bildbearbeitung als Proof-of-Concept (z. B. weichgezeichnetes Foto)
 

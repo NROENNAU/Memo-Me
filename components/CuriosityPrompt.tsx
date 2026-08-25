@@ -1,11 +1,9 @@
-// Fragt den Nutzer nach einer eigenen Geschichte zu einem Foto (Name,
-// Anekdote, ...), während im Hintergrund der Rest der Quizrunde vorbereitet
-// wird – so wird die sonst tote Ladezeit sinnvoll genutzt. Diese Eingaben
-// bilden die Grundlage für persönlichere Quizfragen, die mit der Zeit
-// entstehen. Text und Mikro teilen sich eine Eingabezeile (Chat-Stil):
-// Mikro-Tap nimmt eine Sprachnachricht auf, die Aufnahme wird danach zur
-// Kontrolle angezeigt, statt live transkribiert zu werden (das bräuchte
-// Spracherkennung außerhalb von Expo Go).
+// Stellt zwischendurch im Quiz eine kurze Wissensfrage zum aktuellen Foto -
+// welche Frage das ist, entscheidet services/curiosityService.ts anhand
+// dessen, was zu diesem Foto noch fehlt. Text und Mikro teilen sich eine
+// Eingabezeile (Chat-Stil): Mikro-Tap nimmt eine Sprachnachricht auf, die
+// Aufnahme wird danach zur Kontrolle angezeigt, statt live transkribiert zu
+// werden (das bräuchte Spracherkennung außerhalb von Expo Go).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -31,9 +29,13 @@ import {
 import { AudioPlayButton } from './AudioPlayButton';
 import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme';
 
-interface MemoryPromptProps {
+interface CuriosityPromptProps {
   photoUri: string;
-  onSubmit: (memory: { text: string | null; audioUri: string | null }) => void;
+  heading: string;
+  subtitle: string;
+  placeholder: string;
+  allowVoice: boolean;
+  onSubmit: (answer: { text: string | null; audioUri: string | null }) => void;
   onSkip: () => void;
 }
 
@@ -43,7 +45,15 @@ function formatDuration(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function MemoryPrompt({ photoUri, onSubmit, onSkip }: MemoryPromptProps) {
+export function CuriosityPrompt({
+  photoUri,
+  heading,
+  subtitle,
+  placeholder,
+  allowVoice,
+  onSubmit,
+  onSkip,
+}: CuriosityPromptProps) {
   const [text, setText] = useState('');
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [recordedSeconds, setRecordedSeconds] = useState(0);
@@ -119,11 +129,8 @@ export function MemoryPrompt({ photoUri, onSubmit, onSkip }: MemoryPromptProps) 
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.heading}>Dein Quiz wird vorbereitet …</Text>
-        <Text style={styles.subtitle}>
-          Erzähl uns in der Zwischenzeit kurz etwas zu diesem Foto – ein Name, eine kleine
-          Geschichte. Das nutzen wir für spannendere Fragen.
-        </Text>
+        <Text style={styles.heading}>{heading}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         <Image
           source={{ uri: photoUri }}
@@ -166,21 +173,23 @@ export function MemoryPrompt({ photoUri, onSubmit, onSkip }: MemoryPromptProps) 
             <>
               <TextInput
                 style={styles.composeInput}
-                placeholder="Erzähl uns etwas …"
+                placeholder={placeholder}
                 placeholderTextColor={colors.textSecondary}
                 value={text}
                 onChangeText={setText}
                 multiline
-                accessibilityLabel="Deine Geschichte zu diesem Foto"
+                accessibilityLabel={subtitle}
               />
-              <Pressable
-                style={styles.micButton}
-                onPress={handleStartRecording}
-                accessibilityRole="button"
-                accessibilityLabel="Sprachnachricht aufnehmen"
-              >
-                <Ionicons name="mic" size={20} color={colors.textOnPrimary} />
-              </Pressable>
+              {allowVoice && (
+                <Pressable
+                  style={styles.micButton}
+                  onPress={handleStartRecording}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sprachnachricht aufnehmen"
+                >
+                  <Ionicons name="mic" size={20} color={colors.textOnPrimary} />
+                </Pressable>
+              )}
             </>
           )}
         </View>
