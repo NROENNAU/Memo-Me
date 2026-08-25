@@ -31,7 +31,8 @@ import {
   buildWoQuestion,
   shuffle,
 } from '../services/quizService';
-import { isJunkPhoto, isLikelyScreenshot } from '../services/junkPhotoFilter';
+import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
+import { matchesDescription } from '../services/customSourceFilter';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
@@ -141,8 +142,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         const fotoId = await upsertPhoto(photo);
         if (!isMountedRef.current) return;
 
-        if (await isJunkPhoto(fotoId, photo.uri)) continue;
+        const labels = await classifyPhoto(fotoId, photo.uri);
         if (!isMountedRef.current) return;
+        if (isJunkLabels(labels)) continue;
+        if (source.type === 'custom' && !matchesDescription(labels, source.description)) continue;
 
         const [locationName, tags, memory] = await Promise.all([
           photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),

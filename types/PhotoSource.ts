@@ -2,4 +2,5 @@
 export type PhotoSource =
   | { type: 'recent' }
   | { type: 'lastYear' }
-  | { type: 'album'; albumId: string; albumTitle: string };
+  | { type: 'album'; albumId: string; albumTitle: string }
+  | { type: 'custom'; description: string };

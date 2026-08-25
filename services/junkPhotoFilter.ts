@@ -33,7 +33,7 @@ const JUNK_LABEL_KEYWORDS = [
 const MIN_JUNK_CONFIDENCE = 0.4;
 const MAX_LABELS_CHECKED = 5;
 
-function looksLikeJunk(labels: ImageLabel[]): boolean {
+export function isJunkLabels(labels: ImageLabel[]): boolean {
   return labels.slice(0, MAX_LABELS_CHECKED).some((label) => {
     if (label.confidence < MIN_JUNK_CONFIDENCE) return false;
     const identifier = label.identifier.toLowerCase();
@@ -48,23 +48,30 @@ export function isLikelyScreenshot(candidate: { filename?: string; mediaSubtypes
   return candidate.filename ? /screenshot/i.test(candidate.filename) : false;
 }
 
-// Klassifiziert ein Foto (mit Cache in FotoKlassifikation) und liefert
-// zurück, ob es als Beleg/Dokument gilt und daher nicht ins Quiz soll.
-export async function isJunkPhoto(fotoId: number, localUri: string): Promise<boolean> {
+// Klassifiziert ein Foto on-device (mit Cache in FotoKlassifikation), damit
+// dasselbe Foto nicht bei jeder Runde erneut klassifiziert werden muss.
+// Wird sowohl für den Belege/Dokumente-Filter als auch für die "Eigene
+// Auswahl"-Quelle (siehe customSourceFilter.ts) genutzt, damit beide
+// dieselbe Klassifikation wiederverwenden statt sie doppelt zu berechnen.
+export async function classifyPhoto(fotoId: number, localUri: string): Promise<ImageLabel[]> {
   const cached = await getCachedClassification(fotoId);
-  if (cached) return cached.isJunk;
+  if (cached) return cached.labels;
 
   let labels: ImageLabel[] = [];
   try {
     labels = await classifyImage(localUri);
   } catch (error) {
     console.error('Bildklassifikation fehlgeschlagen:', error);
-    // Im Zweifel nicht ausschließen - lieber ein Grenzfall zu viel im Quiz
-    // als ein gutes Foto fälschlich auszuschließen.
-    return false;
+    return [];
   }
 
-  const isJunk = looksLikeJunk(labels);
-  await saveClassification(fotoId, { isJunk, labels });
-  return isJunk;
+  await saveClassification(fotoId, { isJunk: isJunkLabels(labels), labels });
+  return labels;
+}
+
+// Liefert zurück, ob ein Foto als Beleg/Dokument/Screenshot gilt und daher
+// nicht ins Quiz soll.
+export async function isJunkPhoto(fotoId: number, localUri: string): Promise<boolean> {
+  const labels = await classifyPhoto(fotoId, localUri);
+  return isJunkLabels(labels);
 }
