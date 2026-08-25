@@ -32,7 +32,8 @@ import {
   shuffle,
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
-import { matchesDescription } from '../services/customSourceFilter';
+import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
+import { ImageLabel } from '../modules/image-classifier/src';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
@@ -160,23 +161,52 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           chunk.map(async (candidate) => {
             const photo = await resolvePhotoDetails(candidate);
             const fotoId = await upsertPhoto(photo);
-            const labels = await classifyPhoto(fotoId, photo.uri);
-            return { photo, fotoId, labels };
+
+            // Bei "Eigene Auswahl" zuerst gegen Daten prüfen, die die App
+            // schon über das Foto weiß (Personen-Tags, aufgelöster
+            // Ortsname) - kein ML nötig, quasi instantan. Erst wenn das
+            // nichts ergibt, die deutlich langsamere Bildklassifikation
+            // bemühen.
+            let locationName: string | null = null;
+            let tags: string[] | null = null;
+            let matchedByMetadata = false;
+
+            if (source.type === 'custom') {
+              [locationName, tags] = await Promise.all([
+                photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
+                getPhotoTags(fotoId),
+              ]);
+              matchedByMetadata =
+                matchesTags(tags, source.description) || matchesLocation(locationName, source.description);
+            }
+
+            const labels: ImageLabel[] = matchedByMetadata ? [] : await classifyPhoto(fotoId, photo.uri);
+
+            return { photo, fotoId, labels, locationName, tags, matchedByMetadata };
           })
         );
         if (!isMountedRef.current) return;
 
-        for (const { photo, fotoId, labels } of resolved) {
+        for (const item of resolved) {
           if (quizPhotos.length >= QUIZ_LENGTH) break;
 
-          if (isJunkLabels(labels)) continue;
-          if (source.type === 'custom' && !matchesDescription(labels, source.description)) continue;
+          const { photo, fotoId, labels, matchedByMetadata } = item;
+          let { locationName, tags } = item;
 
-          const [locationName, tags, memory] = await Promise.all([
-            photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
-            getPhotoTags(fotoId),
-            getMemoryForPhoto(fotoId),
-          ]);
+          if (!matchedByMetadata) {
+            if (isJunkLabels(labels)) continue;
+            if (source.type === 'custom' && !matchesDescription(labels, source.description)) continue;
+          }
+
+          if (source.type !== 'custom') {
+            [locationName, tags] = await Promise.all([
+              photo.coordinates ? reverseGeocode(photo.coordinates) : Promise.resolve(null),
+              getPhotoTags(fotoId),
+            ]);
+            if (!isMountedRef.current) return;
+          }
+
+          const memory = await getMemoryForPhoto(fotoId);
           if (!isMountedRef.current) return;
 
           if (!hasCheckedCuriosity) {
