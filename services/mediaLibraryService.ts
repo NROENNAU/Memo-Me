@@ -5,6 +5,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { PhotoPermissionStatus } from '../types/permissions';
 import { LibraryPhoto } from '../types/Photo';
 import { PhotoSource } from '../types/PhotoSource';
+import { shuffle } from './quizService';
 
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,18 +61,71 @@ export interface CandidatePhoto {
   mediaSubtypes?: string[];
 }
 
-// Schnelle, leichte Liste möglicher Fotos für eine Quelle (kein Ort, keine
-// Detail-Infos) – ein einziger nativer Aufruf. Grundlage für die zufällige
-// Auswahl der Quizrunde, bevor die teuren Details nachgeladen werden.
-export async function listCandidatePhotos(source: PhotoSource, limit: number): Promise<CandidatePhoto[]> {
-  const { assets } = await MediaLibrary.getAssetsAsync(optionsForSource(source, limit));
-  return assets.map((asset) => ({
+function toCandidatePhoto(asset: MediaLibrary.Asset): CandidatePhoto {
+  return {
     assetId: asset.id,
     uri: asset.uri,
     creationTime: asset.creationTime ?? null,
     filename: asset.filename,
     mediaSubtypes: asset.mediaSubtypes,
-  }));
+  };
+}
+
+// In wie viele Zeitabschnitte der verfügbare Zeitraum einer Quelle beim
+// Aufbau des Fotopools unterteilt wird - verhindert, dass eine Quizrunde nur
+// aus den neuesten Fotos besteht, statt über die ganze Quelle durchmischt zu sein.
+const TIME_BUCKETS = 12;
+// Pro Zeitabschnitt wird mehr geholt als gebraucht, damit auch innerhalb
+// eines Abschnitts gemischt werden kann statt immer dieselben (neuesten)
+// Fotos dieses Abschnitts zu bekommen.
+const BUCKET_OVERSAMPLE_FACTOR = 4;
+
+// Schnelle, leichte Liste möglicher Fotos für eine Quelle (kein Ort, keine
+// Detail-Infos) – Grundlage für die Quizrunde, bevor die teuren Details
+// nachgeladen werden. Statt einfach der neuesten `limit` Fotos wird der
+// Zeitraum der Quelle in Abschnitte unterteilt und aus jedem Abschnitt ein
+// Anteil gezogen, damit die Runde über die ganze Quelle durchmischt ist statt
+// nur die zuletzt aufgenommenen Fotos zu zeigen.
+export async function listCandidatePhotos(source: PhotoSource, limit: number): Promise<CandidatePhoto[]> {
+  const [oldest, newest] = await Promise.all([
+    MediaLibrary.getAssetsAsync({
+      ...optionsForSource(source, 1),
+      sortBy: [[MediaLibrary.SortBy.creationTime, true]],
+    }),
+    MediaLibrary.getAssetsAsync({
+      ...optionsForSource(source, 1),
+      sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+    }),
+  ]);
+
+  const oldestTime = oldest.assets[0]?.creationTime;
+  const newestTime = newest.assets[0]?.creationTime;
+
+  // Kein oder nur ein Zeitpunkt bekannt (leere Quelle, oder alle Fotos vom
+  // selben Zeitpunkt) - Aufteilung in Zeitabschnitte bringt hier nichts.
+  if (!oldestTime || !newestTime || oldestTime >= newestTime) {
+    const { assets } = await MediaLibrary.getAssetsAsync(optionsForSource(source, limit));
+    return assets.map(toCandidatePhoto);
+  }
+
+  const perBucket = Math.max(1, Math.ceil(limit / TIME_BUCKETS));
+  const bucketSpan = (newestTime - oldestTime) / TIME_BUCKETS;
+
+  const buckets = await Promise.all(
+    Array.from({ length: TIME_BUCKETS }, (_, index) => {
+      const bucketStart = oldestTime + index * bucketSpan;
+      // Letzter Abschnitt schließt das jüngste Foto mit ein (createdBefore
+      // ist exklusiv).
+      const bucketEnd = index === TIME_BUCKETS - 1 ? newestTime + 1 : bucketStart + bucketSpan;
+      return MediaLibrary.getAssetsAsync({
+        ...optionsForSource(source, perBucket * BUCKET_OVERSAMPLE_FACTOR),
+        createdAfter: bucketStart,
+        createdBefore: bucketEnd,
+      });
+    })
+  );
+
+  return buckets.flatMap(({ assets }) => shuffle(assets).slice(0, perBucket).map(toCandidatePhoto));
 }
 
 // Lädt die vollständigen Metadaten (u. a. GPS-Ort) für ein einzelnes Foto
