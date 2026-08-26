@@ -47,7 +47,7 @@ import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository'
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
 import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
-import { getProfile } from '../db/profileRepository';
+import { DEFAULT_PUZZLE_GRID_SIZE, getProfile } from '../db/profileRepository';
 import { LibraryPhoto } from '../types/Photo';
 import { RootStackParamList } from '../types/navigation';
 import { colors, spacing, radius, typography } from '../theme';
@@ -146,6 +146,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // Erhöht sich bei jedem (Neu-)Start einer Runde, damit der Timer auch dann
   // zurückgesetzt wird, wenn currentIndex zufällig schon 0 war.
   const [quizRunId, setQuizRunId] = useState(0);
+  // Raster-Größe fürs Foto-Puzzle, ebenfalls aus den Nutzereinstellungen.
+  const [puzzleGridSize, setPuzzleGridSize] = useState(DEFAULT_PUZZLE_GRID_SIZE);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -157,7 +159,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     getProfile().then((profile) => {
-      if (isMountedRef.current) setTimerDuration(profile.timerSeconds);
+      if (!isMountedRef.current) return;
+      setTimerDuration(profile.timerSeconds);
+      setPuzzleGridSize(profile.puzzleGridSize);
     });
   }, []);
 
@@ -384,7 +388,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           : null;
       },
       () => {
-        const puzzle = buildPuzzleQuestion(currentItem.photo);
+        const puzzle = buildPuzzleQuestion(currentItem.photo, puzzleGridSize);
         return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
       },
       () => {
@@ -409,7 +413,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       return { type: 'WANN', options: wann.options.map(String), correctOption: String(wann.correctYear) };
     }
     return null;
-  }, [currentItem, photos, currentIndex]);
+  }, [currentItem, photos, currentIndex, puzzleGridSize]);
 
   // Ob gerade tatsächlich eine unbeantwortete Frage sichtbar ist - der Timer
   // (siehe unten) läuft nur währenddessen, nicht beim Laden, während einer

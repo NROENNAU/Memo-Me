@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS Profil (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   spitzname TEXT,
   avatar_uri TEXT,
-  timer_dauer INTEGER         -- Sekunden pro Quizfrage, 0 = kein Timer
+  timer_dauer INTEGER,        -- Sekunden pro Quizfrage, 0 = kein Timer
+  puzzle_groesse INTEGER      -- Raster-Größe fürs Foto-Puzzle (z. B. 2 = 2x2, 3 = 3x3)
 );
 `;
 

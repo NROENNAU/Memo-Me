@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { getProfile, saveProfile } from '../db/profileRepository';
+import { DEFAULT_PUZZLE_GRID_SIZE, getProfile, saveProfile } from '../db/profileRepository';
 import { RootStackParamList } from '../types/navigation';
 import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme';
 
@@ -18,11 +18,17 @@ const AVATAR_SIZE = 120;
 const TIMER_STEP_SECONDS = 5;
 const MAX_TIMER_SECONDS = 60;
 
+const PUZZLE_GRID_OPTIONS = [
+  { size: 2, label: 'Einfach (2x2)' },
+  { size: 3, label: 'Schwer (3x3)' },
+];
+
 export function SettingsScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [nickname, setNickname] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [timerSeconds, setTimerSeconds] = useState(0);
+  const [puzzleGridSize, setPuzzleGridSize] = useState(DEFAULT_PUZZLE_GRID_SIZE);
 
   useEffect(() => {
     let isActive = true;
@@ -31,6 +37,7 @@ export function SettingsScreen({ navigation }: Props) {
       setNickname(profile.nickname ?? '');
       setAvatarUri(profile.avatarUri);
       setTimerSeconds(profile.timerSeconds);
+      setPuzzleGridSize(profile.puzzleGridSize);
       setIsLoading(false);
     });
     return () => {
@@ -66,7 +73,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   async function handleSave() {
     try {
-      await saveProfile({ nickname: nickname.trim() || null, avatarUri, timerSeconds });
+      await saveProfile({ nickname: nickname.trim() || null, avatarUri, timerSeconds, puzzleGridSize });
       navigation.goBack();
     } catch (error) {
       console.error('Profil konnte nicht gespeichert werden:', error);
@@ -143,6 +150,29 @@ export function SettingsScreen({ navigation }: Props) {
               >
                 <Ionicons name="add" size={20} color={colors.primary} />
               </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Puzzle-Schwierigkeit</Text>
+            <View style={styles.puzzleRow}>
+              {PUZZLE_GRID_OPTIONS.map((option) => {
+                const isActive = puzzleGridSize === option.size;
+                return (
+                  <Pressable
+                    key={option.size}
+                    style={[styles.puzzleOption, isActive && styles.puzzleOptionActive]}
+                    onPress={() => setPuzzleGridSize(option.size)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                    accessibilityLabel={option.label}
+                  >
+                    <Text style={[styles.puzzleOptionText, isActive && styles.puzzleOptionTextActive]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
 
@@ -255,6 +285,32 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     minWidth: 60,
     textAlign: 'center',
+  },
+  puzzleRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  puzzleOption: {
+    flex: 1,
+    minHeight: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+  },
+  puzzleOptionActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  puzzleOptionText: {
+    ...typography.body,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  puzzleOptionTextActive: {
+    color: colors.primaryDark,
   },
   saveButton: {
     width: '100%',

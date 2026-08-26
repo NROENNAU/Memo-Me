@@ -131,18 +131,16 @@ export function buildErinnerungQuestion(correctText: string | null, otherTexts: 
   return { correctText: correctPreview, options: shuffle([correctPreview, ...wrongTexts]) };
 }
 
-// Anzahl Zeilen/Spalten für das Foto-Puzzle - 3x3 ist auf einem Handy-Screen
-// noch gut antippbar und trotzdem eine echte Herausforderung.
-const PUZZLE_GRID_SIZE = 3;
-
 export interface PuzzleQuestion {
   photoUri: string;
   gridSize: number;
 }
 
-// Das Puzzle braucht nur ein Foto - geht also praktisch immer.
-export function buildPuzzleQuestion(photo: LibraryPhoto): PuzzleQuestion {
-  return { photoUri: photo.uri, gridSize: PUZZLE_GRID_SIZE };
+// Das Puzzle braucht nur ein Foto - geht also praktisch immer. Die
+// Raster-Größe (Zeilen/Spalten) kommt aus den Nutzereinstellungen (siehe
+// db/profileRepository.ts), da 3x3 (9 Teile) für den Einstieg zu schwer ist.
+export function buildPuzzleQuestion(photo: LibraryPhoto, gridSize: number): PuzzleQuestion {
+  return { photoUri: photo.uri, gridSize };
 }
 
 // Wie viele Fotos zusammen in die Zeitleiste kommen.
