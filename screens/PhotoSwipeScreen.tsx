@@ -154,6 +154,18 @@ type Question =
   | ZuordnungQuestionView
   | KarteQuestionView;
 
+// Mischt die Fragetyp-Kandidaten zufällig und sortiert sie danach stabil
+// nach ihrer bisherigen Häufigkeit in dieser Runde (aufsteigend) - seltener
+// gestellte Typen werden also zuerst versucht. Array.prototype.sort ist in
+// JS stabil, daher bleibt die zufällige Reihenfolge innerhalb gleich
+// häufiger Typen erhalten, statt beim Sortieren wieder verloren zu gehen.
+function orderByFairness<T extends { type: QuestionKind }>(
+  candidates: T[],
+  counts: Record<QuestionKind, number>
+): T[] {
+  return shuffle(candidates).sort((a, b) => counts[a.type] - counts[b.type]);
+}
+
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
 export function PhotoSwipeScreen({ route, navigation }: Props) {
@@ -204,6 +216,21 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // Merkt sich, welche Reservoir-Fotos in dieser Runde schon als Distraktor
   // gezeigt wurden, damit auch innerhalb des Reservoirs kein Foto zweimal auftaucht.
   const usedReservoirUrisRef = useRef<Set<string>>(new Set());
+  // Zählt pro Fragetyp, wie oft er in dieser Runde schon gestellt wurde -
+  // Grundlage für die faire Reihenfolge unten (siehe orderByFairness). Ohne
+  // das würden Typen, die praktisch immer gelingen (z. B. Puzzle), Typen mit
+  // oft fehlenden Daten (Wo/Wer/Erinnerung/...) systematisch verdrängen.
+  const questionTypeCountsRef = useRef<Record<QuestionKind, number>>({
+    WANN: 0,
+    WO: 0,
+    WER: 0,
+    ERINNERUNG: 0,
+    PUZZLE: 0,
+    FOTO_AUSWAHL: 0,
+    PAARCHEN: 0,
+    ZUORDNUNG: 0,
+    KARTE: 0,
+  });
   const [isCurrentFavorite, setIsCurrentFavorite] = useState(false);
 
   const isMountedRef = useRef(true);
@@ -252,6 +279,17 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setQuizRunId((id) => id + 1);
     setReservoirPhotos([]);
     usedReservoirUrisRef.current = new Set();
+    questionTypeCountsRef.current = {
+      WANN: 0,
+      WO: 0,
+      WER: 0,
+      ERINNERUNG: 0,
+      PUZZLE: 0,
+      FOTO_AUSWAHL: 0,
+      PAARCHEN: 0,
+      ZUORDNUNG: 0,
+      KARTE: 0,
+    };
 
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
@@ -430,118 +468,157 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   const currentItem = photos?.[currentIndex] ?? null;
 
-  // Wählt zufällig aus den Fragetypen, die sich für das aktuelle Foto
-  // tatsächlich bilden lassen (Wer/Erinnerung brauchen entsprechende Daten
-  // zu diesem Foto) - so variiert die Art der Frage, statt starr zwischen
-  // Wann und Wo zu wechseln. Wann geht immer und dient als letzter Rückfall.
+  // Wählt aus den Fragetypen, die sich für das aktuelle Foto tatsächlich
+  // bilden lassen (Wer/Erinnerung brauchen entsprechende Daten zu diesem
+  // Foto). Statt einfach zufällig zu mischen und den ersten erfolgreichen
+  // Versuch zu nehmen, wird nach Häufigkeit sortiert: Fragetypen, die in
+  // dieser Runde schon öfter drankamen, werden hintenangestellt (siehe
+  // orderByFairness unten). Sonst würden Typen wie Puzzle oder die
+  // Datum-Variante von Foto-Auswahl - die praktisch immer gelingen, weil
+  // jedes Foto ein Aufnahmedatum hat - Typen wie Wo/Wer/Erinnerung/Pärchen/
+  // Zuordnung/Karte verdrängen, die oft an fehlenden Daten (Ort, Namen, GPS)
+  // scheitern und dadurch seltener zum Zug kämen.
   const question: Question | null = useMemo(() => {
     if (!currentItem || !photos) return null;
 
     const others = photos.filter((_, index) => index !== currentIndex);
 
-    const builders: Array<() => Question | null> = [
-      () => {
-        const otherPlaces = others.map((item) => item.locationName).filter((place): place is string => place !== null);
-        const wo = buildWoQuestion(currentItem.locationName, otherPlaces);
-        return wo ? { type: 'WO', options: wo.options, correctOption: wo.correctPlace } : null;
+    const builders: Array<{ type: QuestionKind; build: () => Question | null }> = [
+      {
+        type: 'WO',
+        build: () => {
+          const otherPlaces = others.map((item) => item.locationName).filter((place): place is string => place !== null);
+          const wo = buildWoQuestion(currentItem.locationName, otherPlaces);
+          return wo ? { type: 'WO', options: wo.options, correctOption: wo.correctPlace } : null;
+        },
       },
-      () => {
-        const otherNames = others.flatMap((item) => item.tags ?? []);
-        const wer = buildWerQuestion(currentItem.tags, otherNames);
-        return wer ? { type: 'WER', options: wer.options, correctOption: wer.correctName } : null;
+      {
+        type: 'WER',
+        build: () => {
+          const otherNames = others.flatMap((item) => item.tags ?? []);
+          const wer = buildWerQuestion(currentItem.tags, otherNames);
+          return wer ? { type: 'WER', options: wer.options, correctOption: wer.correctName } : null;
+        },
       },
-      () => {
-        const otherTexts = others.map((item) => item.memoryText).filter((text): text is string => text !== null);
-        const erinnerung = buildErinnerungQuestion(currentItem.memoryText, otherTexts);
-        return erinnerung
-          ? { type: 'ERINNERUNG', options: erinnerung.options, correctOption: erinnerung.correctText }
-          : null;
+      {
+        type: 'ERINNERUNG',
+        build: () => {
+          const otherTexts = others.map((item) => item.memoryText).filter((text): text is string => text !== null);
+          const erinnerung = buildErinnerungQuestion(currentItem.memoryText, otherTexts);
+          return erinnerung
+            ? { type: 'ERINNERUNG', options: erinnerung.options, correctOption: erinnerung.correctText }
+            : null;
+        },
       },
-      () => {
-        const puzzle = buildPuzzleQuestion(currentItem.photo, puzzleGridSize);
-        return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
+      {
+        type: 'PUZZLE',
+        build: () => {
+          const puzzle = buildPuzzleQuestion(currentItem.photo, puzzleGridSize);
+          return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
+        },
       },
-      () => {
-        // Alle vier "Foto-Auswahl"-Varianten zählen hier als EIN Los im
-        // Fragetyp-Lostopf (nicht vier) - sonst würde dieser Fragetyp allein
-        // durch seine vier Untervarianten viel häufiger gezogen als alle
-        // anderen, die nur eine Variante haben. Innerhalb dieses einen Loses
-        // wird zufällig unter den vier Varianten probiert.
-        //
-        // Distraktoren kommen aus dem Reservoir statt aus den anderen Fotos
-        // dieser Runde, damit über die ganze Runde hinweg kein Foto doppelt
-        // gezeigt wird (siehe RESERVOIR_SIZE oben) - schon genutzte
-        // Reservoir-Fotos scheiden dafür aus.
-        const fotoAuswahlVarianten: Array<() => PhotoChoiceQuestion | null> = [
-          () => {
-            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-            return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'oldest');
-          },
-          () => {
-            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-            return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'newest');
-          },
-          () => {
-            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-            const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
-            return buildLocationChoiceQuestion(candidates, 'match');
-          },
-          () => {
-            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-            const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
-            return buildLocationChoiceQuestion(candidates, 'mismatch');
-          },
-        ];
+      {
+        type: 'FOTO_AUSWAHL',
+        build: () => {
+          // Alle vier "Foto-Auswahl"-Varianten zählen hier als EIN Los im
+          // Fragetyp-Lostopf (nicht vier) - sonst würde dieser Fragetyp allein
+          // durch seine vier Untervarianten viel häufiger gezogen als alle
+          // anderen, die nur eine Variante haben. Innerhalb dieses einen Loses
+          // wird zufällig unter den vier Varianten probiert.
+          //
+          // Distraktoren kommen aus dem Reservoir statt aus den anderen Fotos
+          // dieser Runde, damit über die ganze Runde hinweg kein Foto doppelt
+          // gezeigt wird (siehe RESERVOIR_SIZE oben) - schon genutzte
+          // Reservoir-Fotos scheiden dafür aus.
+          const fotoAuswahlVarianten: Array<() => PhotoChoiceQuestion | null> = [
+            () => {
+              const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+              return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'oldest');
+            },
+            () => {
+              const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+              return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'newest');
+            },
+            () => {
+              const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+              const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
+              return buildLocationChoiceQuestion(candidates, 'match');
+            },
+            () => {
+              const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+              const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
+              return buildLocationChoiceQuestion(candidates, 'mismatch');
+            },
+          ];
 
-        for (const variant of shuffle(fotoAuswahlVarianten)) {
-          const photoChoice = variant();
-          if (photoChoice) {
-            photoChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
-            return {
-              type: 'FOTO_AUSWAHL',
-              prompt: photoChoice.prompt,
-              options: photoChoice.options,
-              correctOption: photoChoice.correctUri,
-            };
-          }
-        }
-        return null;
-      },
-      () => {
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const paarchen = buildPaarchenQuestion(availableReservoir);
-        if (!paarchen) return null;
-        paarchen.cards.forEach((card) => usedReservoirUrisRef.current.add(card.uri));
-        return { type: 'PAARCHEN', cards: paarchen.cards };
-      },
-      () => {
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const zuordnung = buildZuordnungQuestion(availableReservoir);
-        if (!zuordnung) return null;
-        zuordnung.pairs.forEach((pair) => usedReservoirUrisRef.current.add(pair.uri));
-        return { type: 'ZUORDNUNG', pairs: zuordnung.pairs };
-      },
-      () => {
-        const karte = buildKarteQuestion(currentItem.photo);
-        return karte
-          ? {
-              type: 'KARTE',
-              photoUri: karte.photoUri,
-              targetLatitude: karte.targetLatitude,
-              targetLongitude: karte.targetLongitude,
+          for (const variant of shuffle(fotoAuswahlVarianten)) {
+            const photoChoice = variant();
+            if (photoChoice) {
+              photoChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+              return {
+                type: 'FOTO_AUSWAHL',
+                prompt: photoChoice.prompt,
+                options: photoChoice.options,
+                correctOption: photoChoice.correctUri,
+              };
             }
-          : null;
+          }
+          return null;
+        },
+      },
+      {
+        type: 'PAARCHEN',
+        build: () => {
+          const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+          const paarchen = buildPaarchenQuestion(availableReservoir);
+          if (!paarchen) return null;
+          paarchen.cards.forEach((card) => usedReservoirUrisRef.current.add(card.uri));
+          return { type: 'PAARCHEN', cards: paarchen.cards };
+        },
+      },
+      {
+        type: 'ZUORDNUNG',
+        build: () => {
+          const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+          const zuordnung = buildZuordnungQuestion(availableReservoir);
+          if (!zuordnung) return null;
+          zuordnung.pairs.forEach((pair) => usedReservoirUrisRef.current.add(pair.uri));
+          return { type: 'ZUORDNUNG', pairs: zuordnung.pairs };
+        },
+      },
+      {
+        type: 'KARTE',
+        build: () => {
+          const karte = buildKarteQuestion(currentItem.photo);
+          return karte
+            ? {
+                type: 'KARTE',
+                photoUri: karte.photoUri,
+                targetLatitude: karte.targetLatitude,
+                targetLongitude: karte.targetLongitude,
+              }
+            : null;
+        },
+      },
+      {
+        // Läuft in der fairen Reihenfolge wie jeder andere Typ mit, statt wie
+        // früher ausschließlich als starrer letzter Rückfall - sonst käme
+        // Wann praktisch nie dran, weil Puzzle/Foto-Auswahl vorher schon fast
+        // immer erfolgreich sind (siehe Kommentar oben).
+        type: 'WANN',
+        build: () => {
+          const wann = buildWannQuestion(currentItem.photo);
+          return wann ? { type: 'WANN', options: wann.options.map(String), correctOption: String(wann.correctYear) } : null;
+        },
       },
     ];
 
-    for (const build of shuffle(builders)) {
-      const built = build();
-      if (built) return built;
-    }
-
-    const wann = buildWannQuestion(currentItem.photo);
-    if (wann) {
-      return { type: 'WANN', options: wann.options.map(String), correctOption: String(wann.correctYear) };
+    for (const candidate of orderByFairness(builders, questionTypeCountsRef.current)) {
+      const built = candidate.build();
+      if (built) {
+        questionTypeCountsRef.current[candidate.type] += 1;
+        return built;
+      }
     }
     return null;
   }, [currentItem, photos, currentIndex, puzzleGridSize, reservoirPhotos]);
