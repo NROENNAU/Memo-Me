@@ -1,9 +1,9 @@
 // Erzeugt Quizfragen aus einem Foto: "Wann" (Aufnahmejahr), "Wo" (Ortsname),
 // "Wer" (hinterlegte Personen-Tags) und "Erinnerung" (welche selbst erzählte
 // Geschichte zu diesem Foto gehört) - jeweils mit drei plausiblen, aber
-// falschen Optionen. Dazu zwei spielerische Formen ohne Multiple-Choice:
-// "Puzzle" (Foto in Teile zerlegt wieder zusammensetzen) und "Zeitleiste"
-// (mehrere Fotos in die richtige chronologische Reihenfolge bringen).
+// falschen Optionen. Dazu ein Puzzle (Foto in Teile zerlegt wieder
+// zusammensetzen) und eine Bilderauswahl (ältestes/neuestes Foto oder das
+// zu einem Ort passende/nicht passende Foto antippen).
 import { LibraryPhoto } from '../types/Photo';
 
 export interface WannQuestion {
@@ -143,44 +143,87 @@ export function buildPuzzleQuestion(photo: LibraryPhoto, gridSize: number): Puzz
   return { photoUri: photo.uri, gridSize };
 }
 
-// Wie viele Fotos zusammen in die Zeitleiste kommen.
-const TIMELINE_ITEM_COUNT = 4;
-
-export interface TimelineItem {
-  uri: string;
-  // Volles Aufnahmedatum (Unix-Millisekunden) - sowohl für die eigentliche
-  // chronologische Reihenfolge als auch für die Tag-genaue Anzeige nach
-  // dem Auswerten nötig, ein reines Jahr würde bei Fotos aus demselben
-  // Jahr nicht ausreichen.
-  timestamp: number;
+// Eine Frage, bei der eines von mehreren Fotos angetippt werden muss (statt
+// Text-Optionen) - für "ältestes/neuestes Foto" und "Foto aus/nicht aus
+// einem Ort".
+export interface PhotoChoiceQuestion {
+  prompt: string;
+  // Foto-URIs in zufälliger Anzeige-Reihenfolge.
+  options: string[];
+  correctUri: string;
 }
 
-export interface TimelineQuestion {
-  // In zufälliger Anzeige-Reihenfolge - die eigentliche chronologische
-  // Reihenfolge ergibt sich erst aus den timestamp-Werten.
-  items: TimelineItem[];
-}
+// Wie viele Fotos zur Auswahl stehen.
+const PHOTO_CHOICE_ITEM_COUNT = 4;
 
-// Baut eine Zeitleisten-Frage aus dem aktuellen Foto und einigen anderen
-// Fotos derselben Quizrunde mit bekanntem Aufnahmedatum. Gibt null zurück,
-// wenn die Runde noch nicht genug andere datierte Fotos für eine sinnvolle
-// Reihenfolge enthält.
-export function buildTimelineQuestion(
+// Baut die Frage "Welches Foto ist das älteste/neueste?" aus dem aktuellen
+// Foto und einigen anderen Fotos derselben Quizrunde mit bekanntem
+// Aufnahmedatum. Gibt null zurück, wenn die Runde noch nicht genug andere
+// datierte Fotos enthält.
+export function buildDateExtremeQuestion(
   currentPhoto: LibraryPhoto,
-  otherPhotos: LibraryPhoto[]
-): TimelineQuestion | null {
+  otherPhotos: LibraryPhoto[],
+  variant: 'oldest' | 'newest'
+): PhotoChoiceQuestion | null {
   if (!currentPhoto.creationTime) return null;
 
   const validOthers = otherPhotos.filter(
     (photo) => photo.creationTime !== null && photo.uri !== currentPhoto.uri
   );
-  if (validOthers.length < TIMELINE_ITEM_COUNT - 1) return null;
+  if (validOthers.length < PHOTO_CHOICE_ITEM_COUNT - 1) return null;
 
-  const chosenOthers = shuffle(validOthers).slice(0, TIMELINE_ITEM_COUNT - 1);
-  const items = [currentPhoto, ...chosenOthers].map((photo) => ({
-    uri: photo.uri,
-    timestamp: photo.creationTime as number,
-  }));
+  const chosenOthers = shuffle(validOthers).slice(0, PHOTO_CHOICE_ITEM_COUNT - 1);
+  const all = [currentPhoto, ...chosenOthers];
+  const sorted = [...all].sort((a, b) => (a.creationTime as number) - (b.creationTime as number));
+  const correct = variant === 'oldest' ? sorted[0] : sorted[sorted.length - 1];
 
-  return { items: shuffle(items) };
+  return {
+    prompt: variant === 'oldest' ? 'Welches Foto ist das älteste?' : 'Welches Foto ist das neueste?',
+    options: shuffle(all.map((photo) => photo.uri)),
+    correctUri: correct.uri,
+  };
+}
+
+interface LocationCandidate {
+  uri: string;
+  locationName: string | null;
+}
+
+// Baut die Frage "Welches Foto ist aus <Ort>?" (variant "match") bzw.
+// "Welches Foto ist NICHT aus <Ort>?" (variant "mismatch"). Sucht dafür den
+// unter den Kandidaten häufigsten Ort als "Mehrheitsort" und ein Foto mit
+// einem anderen Ort als Ausreißer. Gibt null zurück, wenn es keine
+// eindeutige Mehrheit mit mindestens einem abweichenden Ort gibt.
+export function buildLocationChoiceQuestion(
+  candidates: LocationCandidate[],
+  variant: 'match' | 'mismatch'
+): PhotoChoiceQuestion | null {
+  const withLocation = candidates.filter(
+    (candidate): candidate is { uri: string; locationName: string } => candidate.locationName !== null
+  );
+  if (withLocation.length < PHOTO_CHOICE_ITEM_COUNT) return null;
+
+  const groups = new Map<string, { uri: string; locationName: string }[]>();
+  for (const candidate of withLocation) {
+    const group = groups.get(candidate.locationName) ?? [];
+    group.push(candidate);
+    groups.set(candidate.locationName, group);
+  }
+
+  const [majorityPlace, majorityItems] = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length)[0];
+  const minorityCandidates = withLocation.filter((candidate) => candidate.locationName !== majorityPlace);
+  if (majorityItems.length < PHOTO_CHOICE_ITEM_COUNT - 1 || minorityCandidates.length === 0) return null;
+
+  const oddOne = shuffle(minorityCandidates)[0];
+  const sameGroupOthers = shuffle(majorityItems).slice(0, PHOTO_CHOICE_ITEM_COUNT - 1);
+  const all = shuffle([oddOne, ...sameGroupOthers]);
+
+  return {
+    prompt:
+      variant === 'mismatch'
+        ? `Welches Foto ist NICHT aus „${majorityPlace}“?`
+        : `Welches Foto ist aus „${oddOne.locationName}“?`,
+    options: all.map((candidate) => candidate.uri),
+    correctUri: oddOne.uri,
+  };
 }

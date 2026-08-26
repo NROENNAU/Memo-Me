@@ -15,7 +15,7 @@ import { AudioPlayButton } from '../components/AudioPlayButton';
 import { CuriosityPrompt } from '../components/CuriosityPrompt';
 import { PhotoActions } from '../components/PhotoActions';
 import { PuzzleGame } from '../components/PuzzleGame';
-import { TimelineGame } from '../components/TimelineGame';
+import { PhotoAnswerOptions } from '../components/PhotoAnswerOptions';
 import { ScoreRing } from '../components/ScoreRing';
 import {
   addPhotosToAlbum,
@@ -27,20 +27,20 @@ import {
 } from '../services/mediaLibraryService';
 import { reverseGeocode } from '../services/locationService';
 import {
+  buildDateExtremeQuestion,
   buildErinnerungQuestion,
+  buildLocationChoiceQuestion,
   buildPuzzleQuestion,
-  buildTimelineQuestion,
   buildWannQuestion,
   buildWerQuestion,
   buildWoQuestion,
   shuffle,
-  TimelineItem,
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
 import { findTargetFacesForDescription, matchesNamedFace, saveNamedFaceEmbedding } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
-import { detectFaces, DetectedFace } from '../modules/face-recognition/src';
+import { DetectedFace } from '../modules/face-recognition/src';
 import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
@@ -76,14 +76,10 @@ interface QuizPhoto {
   locationName: string | null;
   tags: string[] | null;
   memoryText: string | null;
-  // Ob laut Bildklassifikation Menschen auf dem Foto zu sehen sind - die
-  // Zeitleisten-Frage nutzt nur solche Fotos, da sie sich damit leichter
-  // zeitlich einordnen lassen als Landschafts-/Gegenstandsfotos.
-  hasPerson: boolean;
 }
 
 type ChoiceQuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
-type QuestionKind = ChoiceQuestionKind | 'PUZZLE' | 'TIMELINE';
+type QuestionKind = ChoiceQuestionKind | 'PUZZLE' | 'FOTO_AUSWAHL';
 
 interface ChoiceQuestion {
   type: ChoiceQuestionKind;
@@ -97,12 +93,14 @@ interface PuzzleQuestionView {
   gridSize: number;
 }
 
-interface TimelineQuestionView {
-  type: 'TIMELINE';
-  items: TimelineItem[];
+interface PhotoChoiceQuestionView {
+  type: 'FOTO_AUSWAHL';
+  prompt: string;
+  options: string[];
+  correctOption: string;
 }
 
-type Question = ChoiceQuestion | PuzzleQuestionView | TimelineQuestionView;
+type Question = ChoiceQuestion | PuzzleQuestionView | PhotoChoiceQuestionView;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
@@ -314,20 +312,11 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             }
           }
 
-          // Echte Gesichtserkennung statt Szenen-Label-Raten: zuverlässiger
-          // und funktioniert auch bei "Eigene Auswahl"-Treffern, bei denen
-          // die generische Bildklassifikation übersprungen wird (siehe
-          // matchedByMetadata oben). Läuft nur für die tatsächlich
-          // übernommenen Fotos dieser Runde, nicht für den ganzen Pool.
-          const detectedFaces = await detectFaces(photo.uri).catch(() => []);
-          if (!isMountedRef.current) return;
-
           quizPhotos.push({
             photo,
             locationName,
             tags,
             memoryText: memory?.text ?? null,
-            hasPerson: detectedFaces.length > 0,
           });
 
           if (!hasRevealedQuiz) {
@@ -392,14 +381,54 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
       },
       () => {
-        // Nur Fotos mit Menschen - Landschafts-/Gegenstandsfotos lassen sich
-        // in der Zeitleiste schwerer zeitlich einordnen.
-        if (!currentItem.hasPerson) return null;
-        const timeline = buildTimelineQuestion(
+        const dateChoice = buildDateExtremeQuestion(
           currentItem.photo,
-          others.filter((item) => item.hasPerson).map((item) => item.photo)
+          others.map((item) => item.photo),
+          'oldest'
         );
-        return timeline ? { type: 'TIMELINE', items: timeline.items } : null;
+        return dateChoice
+          ? { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri }
+          : null;
+      },
+      () => {
+        const dateChoice = buildDateExtremeQuestion(
+          currentItem.photo,
+          others.map((item) => item.photo),
+          'newest'
+        );
+        return dateChoice
+          ? { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri }
+          : null;
+      },
+      () => {
+        const candidates = [currentItem, ...others].map((item) => ({
+          uri: item.photo.uri,
+          locationName: item.locationName,
+        }));
+        const locationChoice = buildLocationChoiceQuestion(candidates, 'match');
+        return locationChoice
+          ? {
+              type: 'FOTO_AUSWAHL',
+              prompt: locationChoice.prompt,
+              options: locationChoice.options,
+              correctOption: locationChoice.correctUri,
+            }
+          : null;
+      },
+      () => {
+        const candidates = [currentItem, ...others].map((item) => ({
+          uri: item.photo.uri,
+          locationName: item.locationName,
+        }));
+        const locationChoice = buildLocationChoiceQuestion(candidates, 'mismatch');
+        return locationChoice
+          ? {
+              type: 'FOTO_AUSWAHL',
+              prompt: locationChoice.prompt,
+              options: locationChoice.options,
+              correctOption: locationChoice.correctUri,
+            }
+          : null;
       },
     ];
 
@@ -621,10 +650,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   }
 
   // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
-  // zusätzlicher Bestätigen-Schritt mehr.
+  // zusätzlicher Bestätigen-Schritt mehr. Gilt sowohl für Text-Optionen
+  // (Wann/Wo/Wer/Erinnerung) als auch für Foto-Optionen (Foto-Auswahl), die
+  // beide options/correctOption gleich behandeln.
   async function handleSelectAnswer(option: string) {
     if (!currentItem || !question || isRevealed) return;
-    if (question.type === 'PUZZLE' || question.type === 'TIMELINE') return;
+    if (question.type === 'PUZZLE') return;
 
     setSelectedOption(option);
     await finalizeAnswer(question.type, option === question.correctOption);
@@ -635,13 +666,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   function handlePuzzleSolved() {
     if (!currentItem || isRevealed) return;
     finalizeAnswer('PUZZLE', true);
-  }
-
-  // Die Zeitleiste wertet sich selbst aus (siehe TimelineGame) und meldet
-  // hier nur noch, ob die komplette Reihenfolge stimmte.
-  function handleTimelineSubmit(isCorrect: boolean) {
-    if (!currentItem || isRevealed) return;
-    finalizeAnswer('TIMELINE', isCorrect);
   }
 
   // Läuft der Timer ab, ohne dass geantwortet wurde, zählt die Frage als
@@ -762,15 +786,16 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     photos !== null && !isSearchComplete && currentIndex >= photos.length && !curiosityQuestion;
   const isFinished =
     photos !== null && photos.length > 0 && currentIndex >= photos.length && isSearchComplete;
-  const headingByType: Record<QuestionKind, string> = {
+  const headingByType: Record<Exclude<QuestionKind, 'FOTO_AUSWAHL'>, string> = {
     WANN: 'Wann wurde dieses Foto aufgenommen?',
     WO: 'Wo wurde dieses Foto aufgenommen?',
     WER: 'Wer ist auf diesem Foto zu sehen?',
     ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
     PUZZLE: 'Setze das Foto wieder zusammen!',
-    TIMELINE: 'Bring die Fotos in die richtige Reihenfolge!',
   };
-  const headingText = question ? headingByType[question.type] : '';
+  // Bei "Foto-Auswahl" ist die Überschrift dynamisch (z. B. "Welches Foto
+  // ist aus Barcelona?"), bei allen anderen Fragetypen fest.
+  const headingText = !question ? '' : question.type === 'FOTO_AUSWAHL' ? question.prompt : headingByType[question.type];
   // Bei "Wer ist das?" mit mehreren Personen: statt des ganzen Fotos wird
   // der Ausschnitt des gerade abgefragten Gesichts gezeigt, damit eindeutig
   // ist, welche Person gemeint ist.
@@ -880,14 +905,15 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                 )}
                 {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
               </>
-            ) : question.type === 'TIMELINE' ? (
+            ) : question.type === 'FOTO_AUSWAHL' ? (
               <>
                 <Text style={styles.heading}>{headingText}</Text>
-                <TimelineGame
-                  key={currentItem.photo.uri}
-                  items={question.items}
-                  onSubmit={handleTimelineSubmit}
-                  forceReveal={isRevealed}
+                <PhotoAnswerOptions
+                  options={question.options}
+                  selectedOption={selectedOption}
+                  correctOption={question.correctOption}
+                  isRevealed={isRevealed}
+                  onSelect={handleSelectAnswer}
                 />
                 {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
               </>
