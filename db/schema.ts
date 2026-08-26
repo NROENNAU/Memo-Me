@@ -19,7 +19,7 @@ export const CREATE_QUIZ_ERGEBNISSE_TABLE = `
 CREATE TABLE IF NOT EXISTS QuizErgebnisse (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   foto_id INTEGER NOT NULL REFERENCES Fotos(id), -- Bezug zum abgefragten Foto
-  frage_typ TEXT NOT NULL,                       -- 'WANN' | 'WO' | 'WER' | 'ERINNERUNG' | 'PUZZLE' | 'FOTO_AUSWAHL'
+  frage_typ TEXT NOT NULL,                       -- 'WANN' | 'WO' | 'WER' | 'ERINNERUNG' | 'PUZZLE' | 'FOTO_AUSWAHL' | 'PAARCHEN' | 'ZUORDNUNG' | 'KARTE' | 'WANN_REGLER'
   richtig_beantwortet INTEGER NOT NULL,          -- 1 = richtig, 0 = falsch (SQLite kennt kein Boolean)
   datum INTEGER NOT NULL                         -- Zeitpunkt der Beantwortung (Unix-Millisekunden)
 );

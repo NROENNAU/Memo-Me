@@ -2,8 +2,11 @@
 // "Wer" (hinterlegte Personen-Tags) und "Erinnerung" (welche selbst erzählte
 // Geschichte zu diesem Foto gehört) - jeweils mit drei plausiblen, aber
 // falschen Optionen. Dazu ein Puzzle (Foto in Teile zerlegt wieder
-// zusammensetzen) und eine Bilderauswahl (ältestes/neuestes Foto oder das
-// zu einem Ort passende/nicht passende Foto antippen).
+// zusammensetzen), eine Bilderauswahl (ältestes/neuestes Foto oder das zu
+// einem Ort passende/nicht passende Foto antippen), ein Pärchen-Memory
+// (Fotos mit gemeinsamem Merkmal finden), eine Zuordnung (Fotos und Namen
+// verbinden), eine Karten-Schätzfrage (Aufnahmeort auf der Weltkarte
+// antippen) und ein Jahres-Regler (Jahr per Schieberegler schätzen).
 import { LibraryPhoto } from '../types/Photo';
 
 export interface WannQuestion {
@@ -234,4 +237,165 @@ export function buildLocationChoiceQuestion(
     options: all.map((candidate) => candidate.uri),
     correctUri: oddOne.uri,
   };
+}
+
+// Karten-Schätzfrage: der Aufnahmeort eines Fotos soll auf einer Weltkarte
+// angetippt werden. Gibt null zurück, wenn das Foto keine GPS-Koordinaten hat.
+export interface KarteQuestion {
+  photoUri: string;
+  targetLatitude: number;
+  targetLongitude: number;
+}
+
+export function buildKarteQuestion(photo: LibraryPhoto): KarteQuestion | null {
+  if (!photo.coordinates) return null;
+  return {
+    photoUri: photo.uri,
+    targetLatitude: photo.coordinates.latitude,
+    targetLongitude: photo.coordinates.longitude,
+  };
+}
+
+// Jahres-Regler: das Aufnahmejahr per Schieberegler statt per Multiple-Choice
+// schätzen. Der Regler deckt einen Bereich um das echte Jahr ab.
+export interface WannReglerQuestion {
+  correctYear: number;
+  minYear: number;
+  maxYear: number;
+}
+
+const WANN_REGLER_SPREAD_YEARS = 6;
+
+export function buildWannReglerQuestion(photo: LibraryPhoto): WannReglerQuestion | null {
+  if (!photo.creationTime) return null;
+  const correctYear = new Date(photo.creationTime).getFullYear();
+  return {
+    correctYear,
+    minYear: correctYear - WANN_REGLER_SPREAD_YEARS,
+    maxYear: correctYear + WANN_REGLER_SPREAD_YEARS,
+  };
+}
+
+// Pärchen-Memory: mehrere zugedeckte Karten, von denen je zwei ein
+// gemeinsames Merkmal teilen (gleiches Jahr, gleicher Ort oder gleiche
+// Person) statt identischer Bilder - das Merkmal wird beim Aufdecken
+// angezeigt und muss sich gemerkt werden.
+export interface MemoryCard {
+  uri: string;
+  // Der beim Aufdecken angezeigte Text (Jahr, Ort oder Name).
+  attributeLabel: string;
+  // Zwei Karten mit demselben groupKey bilden ein Pärchen.
+  groupKey: string;
+}
+
+export interface PaarchenQuestion {
+  // Bereits gemischt.
+  cards: MemoryCard[];
+}
+
+interface MemoryCandidate {
+  uri: string;
+  locationName: string | null;
+  creationTime: number | null;
+  tags: string[] | null;
+}
+
+const MEMORY_MIN_PAIRS = 2;
+const MEMORY_MAX_PAIRS = 4;
+
+// Baut die Pärchen-Frage aus einem Kandidatenpool (siehe Reservoir in
+// PhotoSwipeScreen) - gruppiert nach Jahr, Ort und Person, wählt daraus
+// bis zu MEMORY_MAX_PAIRS Gruppen mit mindestens zwei Mitgliedern, wobei
+// kein Foto in mehr als einem Pärchen landet. Gibt null zurück, wenn nicht
+// mindestens MEMORY_MIN_PAIRS vollständige Pärchen zusammenkommen.
+export function buildPaarchenQuestion(candidates: MemoryCandidate[]): PaarchenQuestion | null {
+  const groups = new Map<string, { uri: string; label: string }[]>();
+
+  function addToGroup(key: string, label: string, uri: string) {
+    const group = groups.get(key) ?? [];
+    group.push({ uri, label });
+    groups.set(key, group);
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.creationTime) {
+      const year = new Date(candidate.creationTime).getFullYear();
+      addToGroup(`jahr:${year}`, String(year), candidate.uri);
+    }
+    if (candidate.locationName) {
+      addToGroup(`ort:${candidate.locationName}`, candidate.locationName, candidate.uri);
+    }
+    for (const tag of candidate.tags ?? []) {
+      addToGroup(`person:${tag}`, tag, candidate.uri);
+    }
+  }
+
+  const eligibleGroups = shuffle(Array.from(groups.entries()).filter(([, members]) => members.length >= 2));
+
+  const usedUris = new Set<string>();
+  const cards: MemoryCard[] = [];
+  let pairCount = 0;
+
+  for (const [groupKey, members] of eligibleGroups) {
+    if (pairCount >= MEMORY_MAX_PAIRS) break;
+    const available = members.filter((member) => !usedUris.has(member.uri));
+    // Ein Merkmal kann mehrfach denselben Wert haben (z. B. drei Fotos aus
+    // demselben Jahr) - trotzdem pro Foto nur eine Karte, sonst könnte ein
+    // Foto sein eigenes Pärchen bilden.
+    const distinctByUri = Array.from(new Map(available.map((member) => [member.uri, member])).values());
+    if (distinctByUri.length < 2) continue;
+
+    const [first, second] = shuffle(distinctByUri).slice(0, 2);
+    usedUris.add(first.uri);
+    usedUris.add(second.uri);
+    cards.push({ uri: first.uri, attributeLabel: first.label, groupKey });
+    cards.push({ uri: second.uri, attributeLabel: second.label, groupKey });
+    pairCount += 1;
+  }
+
+  if (pairCount < MEMORY_MIN_PAIRS) return null;
+  return { cards: shuffle(cards) };
+}
+
+// Zuordnung: mehrere Fotos und die dazugehörigen Namen gleichzeitig zeigen,
+// per Antippen verbinden lassen.
+export interface MatchPair {
+  uri: string;
+  name: string;
+}
+
+export interface ZuordnungQuestion {
+  pairs: MatchPair[];
+}
+
+const ZUORDNUNG_ITEM_COUNT = 4;
+const ZUORDNUNG_MIN_ITEM_COUNT = 3;
+
+interface ZuordnungCandidate {
+  uri: string;
+  tags: string[] | null;
+}
+
+// Baut die Zuordnungs-Frage aus einem Kandidatenpool mit hinterlegten
+// Namen (siehe "Wer ist das?"). Nutzt pro Foto nur den ersten Namen, damit
+// die Zuordnung eindeutig bleibt, und verlangt lauter unterschiedliche
+// Namen (sonst wäre nicht klar, welches Foto zu welchem gehört). Gibt null
+// zurück, wenn nicht mindestens ZUORDNUNG_MIN_ITEM_COUNT solcher Fotos mit
+// eindeutigem Namen zusammenkommen.
+export function buildZuordnungQuestion(candidates: ZuordnungCandidate[]): ZuordnungQuestion | null {
+  const named = candidates
+    .filter((candidate) => candidate.tags && candidate.tags.length > 0)
+    .map((candidate) => ({ uri: candidate.uri, name: (candidate.tags as string[])[0] }));
+
+  const seenNames = new Set<string>();
+  const uniqueByName = named.filter((candidate) => {
+    if (seenNames.has(candidate.name)) return false;
+    seenNames.add(candidate.name);
+    return true;
+  });
+
+  if (uniqueByName.length < ZUORDNUNG_MIN_ITEM_COUNT) return null;
+
+  const pairs = shuffle(uniqueByName).slice(0, ZUORDNUNG_ITEM_COUNT);
+  return { pairs };
 }

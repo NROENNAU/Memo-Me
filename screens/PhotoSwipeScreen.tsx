@@ -17,6 +17,10 @@ import { CuriosityPrompt } from '../components/CuriosityPrompt';
 import { PhotoActions } from '../components/PhotoActions';
 import { PuzzleGame } from '../components/PuzzleGame';
 import { PhotoAnswerOptions } from '../components/PhotoAnswerOptions';
+import { MemoryGame } from '../components/MemoryGame';
+import { MatchGame } from '../components/MatchGame';
+import { MapGuessGame } from '../components/MapGuessGame';
+import { YearSliderGame } from '../components/YearSliderGame';
 import { ScoreRing } from '../components/ScoreRing';
 import {
   addPhotosToAlbum,
@@ -30,11 +34,17 @@ import { reverseGeocode } from '../services/locationService';
 import {
   buildDateExtremeQuestion,
   buildErinnerungQuestion,
+  buildKarteQuestion,
   buildLocationChoiceQuestion,
+  buildPaarchenQuestion,
   buildPuzzleQuestion,
   buildWannQuestion,
+  buildWannReglerQuestion,
   buildWerQuestion,
   buildWoQuestion,
+  buildZuordnungQuestion,
+  MatchPair,
+  MemoryCard,
   shuffle,
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
@@ -73,11 +83,10 @@ const CLASSIFICATION_CONCURRENCY = 4;
 // Ab dieser vertikalen Strecke (in Pixeln) zählt eine Wisch-nach-oben-Geste.
 const SWIPE_UP_THRESHOLD = 60;
 // Zusätzliche Fotos, die nie als eigene Quizfrage drankommen, sondern nur
-// als Distraktoren für die "Foto-Auswahl"-Frage bereitstehen (siehe
-// buildDateExtremeQuestion/buildLocationChoiceQuestion) - dadurch taucht
-// über die ganze Runde hinweg kein Foto doppelt auf, weder als Frage noch
-// als Distraktor.
-const RESERVOIR_SIZE = 20;
+// als Distraktoren/Material für Fragen wie "Foto-Auswahl", "Pärchen" und
+// "Zuordnung" bereitstehen - dadurch taucht über die ganze Runde hinweg
+// kein Foto doppelt auf, weder als Frage noch als Distraktor.
+const RESERVOIR_SIZE = 30;
 
 interface QuizPhoto {
   photo: LibraryPhoto;
@@ -90,10 +99,18 @@ interface ReservoirPhoto {
   uri: string;
   locationName: string | null;
   creationTime: number | null;
+  tags: string[] | null;
 }
 
 type ChoiceQuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
-type QuestionKind = ChoiceQuestionKind | 'PUZZLE' | 'FOTO_AUSWAHL';
+type QuestionKind =
+  | ChoiceQuestionKind
+  | 'PUZZLE'
+  | 'FOTO_AUSWAHL'
+  | 'PAARCHEN'
+  | 'ZUORDNUNG'
+  | 'KARTE'
+  | 'WANN_REGLER';
 
 interface ChoiceQuestion {
   type: ChoiceQuestionKind;
@@ -107,6 +124,31 @@ interface PuzzleQuestionView {
   gridSize: number;
 }
 
+interface PaarchenQuestionView {
+  type: 'PAARCHEN';
+  cards: MemoryCard[];
+}
+
+interface ZuordnungQuestionView {
+  type: 'ZUORDNUNG';
+  pairs: MatchPair[];
+}
+
+interface KarteQuestionView {
+  type: 'KARTE';
+  photoUri: string;
+  targetLatitude: number;
+  targetLongitude: number;
+}
+
+interface WannReglerQuestionView {
+  type: 'WANN_REGLER';
+  photoUri: string;
+  correctYear: number;
+  minYear: number;
+  maxYear: number;
+}
+
 interface PhotoChoiceQuestionView {
   type: 'FOTO_AUSWAHL';
   prompt: string;
@@ -114,7 +156,14 @@ interface PhotoChoiceQuestionView {
   correctOption: string;
 }
 
-type Question = ChoiceQuestion | PuzzleQuestionView | PhotoChoiceQuestionView;
+type Question =
+  | ChoiceQuestion
+  | PuzzleQuestionView
+  | PhotoChoiceQuestionView
+  | PaarchenQuestionView
+  | ZuordnungQuestionView
+  | KarteQuestionView
+  | WannReglerQuestionView;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
@@ -362,8 +411,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             setPhotos([...quizPhotos]);
           } else if (reservoir.length < RESERVOIR_SIZE) {
             // Runde schon voll: dieses Foto wird nie selbst gefragt, dient
-            // nur noch als frischer Distraktor für "Foto-Auswahl".
-            reservoir.push({ uri: photo.uri, locationName, creationTime: photo.creationTime });
+            // nur noch als frischer Distraktor/Material für Fragen wie
+            // "Foto-Auswahl", "Pärchen" und "Zuordnung".
+            reservoir.push({ uri: photo.uri, locationName, creationTime: photo.creationTime, tags });
           }
         }
       }
@@ -461,6 +511,43 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           options: locationChoice.options,
           correctOption: locationChoice.correctUri,
         };
+      },
+      () => {
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const paarchen = buildPaarchenQuestion(availableReservoir);
+        if (!paarchen) return null;
+        paarchen.cards.forEach((card) => usedReservoirUrisRef.current.add(card.uri));
+        return { type: 'PAARCHEN', cards: paarchen.cards };
+      },
+      () => {
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const zuordnung = buildZuordnungQuestion(availableReservoir);
+        if (!zuordnung) return null;
+        zuordnung.pairs.forEach((pair) => usedReservoirUrisRef.current.add(pair.uri));
+        return { type: 'ZUORDNUNG', pairs: zuordnung.pairs };
+      },
+      () => {
+        const karte = buildKarteQuestion(currentItem.photo);
+        return karte
+          ? {
+              type: 'KARTE',
+              photoUri: karte.photoUri,
+              targetLatitude: karte.targetLatitude,
+              targetLongitude: karte.targetLongitude,
+            }
+          : null;
+      },
+      () => {
+        const wannRegler = buildWannReglerQuestion(currentItem.photo);
+        return wannRegler
+          ? {
+              type: 'WANN_REGLER',
+              photoUri: currentItem.photo.uri,
+              correctYear: wannRegler.correctYear,
+              minYear: wannRegler.minYear,
+              maxYear: wannRegler.maxYear,
+            }
+          : null;
       },
     ];
 
@@ -692,7 +779,15 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // beide options/correctOption gleich behandeln.
   async function handleSelectAnswer(option: string) {
     if (!currentItem || !question || isRevealed) return;
-    if (question.type === 'PUZZLE') return;
+    if (
+      question.type !== 'WANN' &&
+      question.type !== 'WO' &&
+      question.type !== 'WER' &&
+      question.type !== 'ERINNERUNG' &&
+      question.type !== 'FOTO_AUSWAHL'
+    ) {
+      return;
+    }
 
     setSelectedOption(option);
     await finalizeAnswer(question.type, option === question.correctOption);
@@ -703,6 +798,34 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   function handlePuzzleSolved() {
     if (!currentItem || isRevealed) return;
     finalizeAnswer('PUZZLE', true);
+  }
+
+  // Das Pärchen-Memory wertet sich selbst aus (siehe MemoryGame) und meldet
+  // hier nur noch, ob alle Paare gefunden wurden.
+  function handleMemoryComplete(isCorrect: boolean) {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('PAARCHEN', isCorrect);
+  }
+
+  // Die Zuordnung wertet sich selbst aus (siehe MatchGame) und meldet hier
+  // nur noch, ob alle Fotos dem richtigen Namen zugeordnet wurden.
+  function handleMatchComplete(isCorrect: boolean) {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('ZUORDNUNG', isCorrect);
+  }
+
+  // Die Karten-Schätzfrage wertet sich selbst aus (siehe MapGuessGame) und
+  // meldet hier nur noch, ob der Tipp nah genug am echten Ort lag.
+  function handleMapGuessSubmit(isCorrect: boolean) {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('KARTE', isCorrect);
+  }
+
+  // Der Jahres-Regler wertet sich selbst aus (siehe YearSliderGame) und
+  // meldet hier nur noch, ob das geschätzte Jahr genau stimmte.
+  function handleYearSliderSubmit(_guessedYear: number, isCorrect: boolean) {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('WANN_REGLER', isCorrect);
   }
 
   // Läuft der Timer ab, ohne dass geantwortet wurde, zählt die Frage als
@@ -854,6 +977,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     WER: 'Wer ist auf diesem Foto zu sehen?',
     ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
     PUZZLE: 'Setze das Foto wieder zusammen!',
+    PAARCHEN: 'Finde die Bildpaare!',
+    ZUORDNUNG: 'Wer gehört zu wem?',
+    KARTE: 'Wo wurde das Foto aufgenommen?',
+    WANN_REGLER: 'Wann wurde dieses Foto aufgenommen?',
   };
   // Bei "Foto-Auswahl" ist die Überschrift dynamisch (z. B. "Welches Foto
   // ist aus Barcelona?"), bei allen anderen Fragetypen fest.
@@ -988,6 +1115,72 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                   correctOption={question.correctOption}
                   isRevealed={isRevealed}
                   onSelect={handleSelectAnswer}
+                />
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
+            ) : question.type === 'PAARCHEN' ? (
+              <>
+                <Text style={styles.heading}>{headingText}</Text>
+                <MemoryGame
+                  key={currentIndex}
+                  cards={question.cards}
+                  onComplete={handleMemoryComplete}
+                  disabled={isRevealed}
+                />
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
+            ) : question.type === 'ZUORDNUNG' ? (
+              <>
+                <Text style={styles.heading}>{headingText}</Text>
+                <MatchGame
+                  key={currentIndex}
+                  pairs={question.pairs}
+                  onComplete={handleMatchComplete}
+                  disabled={isRevealed}
+                />
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
+            ) : question.type === 'KARTE' ? (
+              <>
+                <Text style={styles.heading}>{headingText}</Text>
+                <MapGuessGame
+                  key={currentItem.photo.uri}
+                  photoUri={question.photoUri}
+                  targetLatitude={question.targetLatitude}
+                  targetLongitude={question.targetLongitude}
+                  onSubmit={handleMapGuessSubmit}
+                  disabled={isRevealed}
+                />
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
+            ) : question.type === 'WANN_REGLER' ? (
+              <>
+                {isRevealed ? (
+                  <PhotoActions
+                    onDelete={handleDeletePhoto}
+                    onAddToAlbum={handleOpenAlbumPicker}
+                    onToggleFavorite={handleToggleFavorite}
+                    isFavorite={isCurrentFavorite}
+                    albumLabel={currentAlbum?.albumTitle}
+                  />
+                ) : (
+                  <Text style={styles.heading}>{headingText}</Text>
+                )}
+                <View style={styles.photoWrapper}>
+                  <Image
+                    source={{ uri: currentItem.photo.uri }}
+                    style={styles.photo}
+                    contentFit="cover"
+                    accessibilityLabel="Ein Foto aus deiner Mediathek"
+                  />
+                </View>
+                <YearSliderGame
+                  key={currentItem.photo.uri}
+                  minYear={question.minYear}
+                  maxYear={question.maxYear}
+                  correctYear={question.correctYear}
+                  onSubmit={handleYearSliderSubmit}
+                  disabled={isRevealed}
                 />
                 {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
               </>
