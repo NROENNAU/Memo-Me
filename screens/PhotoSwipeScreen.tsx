@@ -370,10 +370,14 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             const memory = await getMemoryForPhoto(fotoId);
             if (!isMountedRef.current) return;
 
-            // Erst ab dem zweiten angenommenen Foto prüfen, damit das
-            // Lade-Abfragefoto nie dasselbe Foto ist wie das erste Bild im
-            // Quiz (quizPhotos[0]).
-            if (!hasCheckedCuriosity && quizPhotos.length >= 1) {
+            // Für dasselbe Foto geprüft und (falls vorhanden) aktiviert,
+            // das direkt danach auch quizPhotos[0] wird - beides passiert
+            // dadurch im selben synchronen Durchlauf, ohne await dazwischen.
+            // Ein Check erst beim zweiten Foto sah zwar sauberer aus, hatte
+            // aber einen await (getMemoryForPhoto/pickCuriosityQuestion) für
+            // das erste Foto schon dazwischen - das erste Foto wurde also
+            // kurz sichtbar, bevor die Wissensfrage es überraschend ersetzte.
+            if (!hasCheckedCuriosity) {
               hasCheckedCuriosity = true;
               const question = await pickCuriosityQuestion(fotoId, photo.uri);
               if (!isMountedRef.current) return;
