@@ -1286,6 +1286,15 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         <Text style={styles.exitButtonText}>Beenden</Text>
       </Pressable>
 
+      {/* Dauerhaft sichtbare Punkteleiste, solange die Runde läuft - auf dem
+          Abschlussbildschirm (isFinished) steht die Gesamtpunktzahl schon
+          groß beim Ring, daher hier ausgeblendet. */}
+      {!isFinished && (
+        <View style={styles.pointsBadge} accessibilityLabel={`${score.points} Punkte`}>
+          <Text style={styles.pointsBadgeText}>🏆 {score.points}</Text>
+        </View>
+      )}
+
       {currentItem && (
         <AlbumPickerModal
           visible={isAlbumPickerOpen}
@@ -1325,6 +1334,29 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   exitButtonText: {
+    ...typography.button,
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+  pointsBadge: {
+    position: 'absolute',
+    top: spacing.xl,
+    right: spacing.lg,
+    zIndex: 20,
+    elevation: 6,
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  pointsBadgeText: {
     ...typography.button,
     fontSize: 14,
     color: colors.textPrimary,
