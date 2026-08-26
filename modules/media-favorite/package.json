@@ -1,0 +1,9 @@
+{
+  "name": "media-favorite",
+  "version": "0.1.0",
+  "description": "Marks/unmarks a photo as favorite directly in Apple Photos (PhotoKit). iOS only.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "license": "UNLICENSED",
+  "private": true
+}

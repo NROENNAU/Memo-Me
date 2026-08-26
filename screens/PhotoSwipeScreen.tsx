@@ -42,6 +42,7 @@ import { matchesDescription, matchesLocation, matchesTags } from '../services/cu
 import { findTargetFacesForDescription, matchesNamedFace, saveNamedFaceEmbedding } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
 import { DetectedFace } from '../modules/face-recognition/src';
+import { setNativeFavorite } from '../modules/media-favorite/src';
 import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags, getIsFavorite, setFavorite } from '../db/photoRepository';
@@ -748,9 +749,17 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     } catch (error) {
       console.error('Favorit konnte nicht gespeichert werden:', error);
       if (isMountedRef.current) setIsCurrentFavorite(!next);
+      return;
+    }
+
+    // Zusätzlich in der Apple Fotos-App markieren (bestes Bemühen - schlägt
+    // das fehl, bleibt der App-eigene Favoritenstatus trotzdem gesetzt).
+    try {
+      await setNativeFavorite(currentItem.photo.assetId, next);
+    } catch (error) {
+      console.error('Favorit konnte nicht in der Fotos-App gesetzt werden:', error);
     }
   }
-
 
   async function handleAlbumAssigned(albumId: string, albumTitle: string) {
     setIsAlbumPickerOpen(false);
@@ -874,7 +883,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         accessibilityLabel="Quiz beenden"
         hitSlop={spacing.sm}
       >
-        <Ionicons name="close" size={26} color={colors.textPrimary} />
+        <Ionicons name="close" size={20} color={colors.textPrimary} />
+        <Text style={styles.exitButtonText}>Beenden</Text>
       </Pressable>
       <View style={styles.content} {...panResponder.panHandlers}>
         {isLoading && (
@@ -1057,10 +1067,25 @@ const styles = StyleSheet.create({
     top: spacing.md,
     left: spacing.md,
     zIndex: 10,
-    width: MIN_TOUCH_TARGET,
-    height: MIN_TOUCH_TARGET,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  exitButtonText: {
+    ...typography.button,
+    fontSize: 14,
+    color: colors.textPrimary,
   },
   content: {
     flex: 1,
