@@ -8,6 +8,7 @@ import {
   CREATE_FOTO_ALBEN_TABLE,
   CREATE_PROFIL_TABLE,
   CREATE_FOTO_KLASSIFIKATION_TABLE,
+  CREATE_GESICHTER_TABLE,
 } from './schema';
 
 const DATABASE_NAME = 'memo-me.db';
@@ -50,4 +51,5 @@ export async function initDatabase(): Promise<void> {
   await database.execAsync(CREATE_FOTO_ALBEN_TABLE);
   await database.execAsync(CREATE_PROFIL_TABLE);
   await database.execAsync(CREATE_FOTO_KLASSIFIKATION_TABLE);
+  await database.execAsync(CREATE_GESICHTER_TABLE);
 }

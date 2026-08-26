@@ -33,7 +33,9 @@ import {
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
+import { captureNamedFaces, findTargetFacesForDescription, matchesNamedFace } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
+import { NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
@@ -141,6 +143,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         return;
       }
 
+      // Bei "Eigene Auswahl" schon einmal benannte Gesichter (siehe "Wer ist
+      // das?") heranziehen, deren Name zur Beschreibung passt (z. B.
+      // "Daria") - einmal pro Suche geladen, nicht pro Foto.
+      const targetNamedFaces: NamedFace[] =
+        source.type === 'custom' ? await findTargetFacesForDescription(source.description) : [];
+      if (!isMountedRef.current) return;
+
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
       // Bilderkennung Belege/Dokumente aussortieren, bis QUIZ_LENGTH
       // brauchbare Fotos feststehen oder der Pool erschöpft ist. Mehrere
@@ -178,6 +187,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
               ]);
               matchedByMetadata =
                 matchesTags(tags, source.description) || matchesLocation(locationName, source.description);
+              if (!matchedByMetadata && targetNamedFaces.length > 0) {
+                matchedByMetadata = await matchesNamedFace(photo.uri, targetNamedFaces);
+              }
             }
 
             const labels: ImageLabel[] = matchedByMetadata ? [] : await classifyPhoto(fotoId, photo.uri);
@@ -378,6 +390,11 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           savePhotoTags(curiosityFotoId, names).catch((error) => {
             console.error('Namen konnten nicht gespeichert werden:', error);
           });
+          if (curiosityPhotoUri) {
+            captureNamedFaces(curiosityFotoId, curiosityPhotoUri, names).catch((error) => {
+              console.error('Gesicht konnte nicht erfasst werden:', error);
+            });
+          }
         }
       }
     }

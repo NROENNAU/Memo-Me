@@ -113,7 +113,7 @@ function extractSearchTerms(description: string): string[] {
 // Zerlegt die Beschreibung in rohe Wörter ohne Übersetzung - für den
 // Abgleich gegen selbst eingegebene Daten (Namen-Tags, Ortsnamen), wo eine
 // Deutsch-Englisch-Übersetzung keinen Sinn ergibt.
-function extractRawWords(description: string): string[] {
+export function extractRawWords(description: string): string[] {
   return description
     .toLowerCase()
     .split(/[^a-zäöüß]+/)

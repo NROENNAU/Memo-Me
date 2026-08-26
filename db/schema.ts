@@ -74,3 +74,19 @@ CREATE TABLE IF NOT EXISTS FotoKlassifikation (
   klassifiziert_am INTEGER NOT NULL
 );
 `;
+
+// Tabelle "Gesichter": Gesichts-"Fingerabdrücke" (embeddings), die einer vom
+// Nutzer genannten Person zugeordnet sind. Entsteht, sobald jemand bei der
+// "Wer ist das?"-Frage einen Namen einträgt – ermöglicht es danach, dieselbe
+// Person per Gesichtserkennung auf anderen Fotos wiederzufinden. Nur auf iOS
+// befüllt/genutzt (siehe supportsFaceMatching in modules/face-recognition),
+// da Android aktuell keine Wiedererkennung zwischen Fotos anbietet.
+export const CREATE_GESICHTER_TABLE = `
+CREATE TABLE IF NOT EXISTS Gesichter (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  foto_id INTEGER NOT NULL REFERENCES Fotos(id), -- Foto, auf dem das Gesicht benannt wurde
+  name TEXT NOT NULL,                            -- vom Nutzer eingegebener Name der Person
+  embedding TEXT NOT NULL,                       -- Base64-kodierter Fingerabdruck (siehe compareFaceEmbeddings)
+  erstellt_am INTEGER NOT NULL                   -- Zeitpunkt der Eingabe (Unix-Millisekunden)
+);
+`;
