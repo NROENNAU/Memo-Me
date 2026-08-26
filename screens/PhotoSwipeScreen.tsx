@@ -833,7 +833,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && !curiosityQuestion && !isFinished && currentItem && question && (
           <>
-            {timeLeft !== null && !isRevealed && (
+            {timeLeft !== null && (
               <Text style={[styles.timerText, timeLeft <= 5 && styles.timerTextUrgent]}>⏱ {timeLeft}s</Text>
             )}
             {question.type === 'PUZZLE' ? (
