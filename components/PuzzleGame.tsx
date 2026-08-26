@@ -67,10 +67,17 @@ export function PuzzleGame({ photoUri, gridSize, onSolved, disabled = false }: P
   }
 
   const pieceSize = containerSize > 0 ? containerSize / gridSize : 0;
+  // Läuft die Zeit ab, bevor das Puzzle gelöst ist, wird statt der
+  // durcheinandergewürfelten Teile das fertige Foto gezeigt - sonst bliebe
+  // für den Nutzer unklar, wie es hätte aussehen sollen.
+  const showSolution = disabled && !isSolved;
 
   return (
     <View style={styles.container} onLayout={handleLayout}>
-      {containerSize > 0 &&
+      {showSolution ? (
+        <Image source={{ uri: photoUri }} style={styles.solutionImage} contentFit="cover" />
+      ) : (
+        containerSize > 0 &&
         order.map((pieceIndex, position) => {
           const positionRow = Math.floor(position / gridSize);
           const positionCol = position % gridSize;
@@ -108,7 +115,8 @@ export function PuzzleGame({ photoUri, gridSize, onSolved, disabled = false }: P
               />
             </Pressable>
           );
-        })}
+        })
+      )}
     </View>
   );
 }
@@ -130,5 +138,9 @@ const styles = StyleSheet.create({
   tileSelected: {
     borderWidth: 2,
     borderColor: colors.primary,
+  },
+  solutionImage: {
+    width: '100%',
+    height: '100%',
   },
 });
