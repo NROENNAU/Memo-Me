@@ -13,33 +13,16 @@ import { extractRawWords } from './customSourceFilter';
 // echter Nutzung nachjustiert werden.
 const FACE_MATCH_DISTANCE_THRESHOLD = 0.6;
 
-export interface CaptureFacesResult {
-  saved: boolean;
-  facesDetected: number;
-}
-
-// Merkt sich zusätzlich zum Namen (siehe savePhotoTags) einen
-// Gesichts-Fingerabdruck des größten erkannten Gesichts auf dem Foto, damit
-// dieselbe Person später auf anderen Fotos wiedergefunden werden kann.
-// Liefert Diagnose-Infos zurück (wie viele Gesichter erkannt wurden, ob
-// gespeichert wurde), damit sich Ausbleiben eines Treffers nachvollziehen lässt.
-export async function captureNamedFaces(
-  fotoId: number,
-  photoUri: string,
-  names: string[]
-): Promise<CaptureFacesResult> {
-  if (!supportsFaceMatching || names.length === 0) return { saved: false, facesDetected: 0 };
-
-  const faces = await detectFaces(photoUri);
-  const largestFace = faces
-    .filter((face) => face.embedding !== null)
-    .sort((a, b) => b.boundingBox.width * b.boundingBox.height - a.boundingBox.width * a.boundingBox.height)[0];
-  if (!largestFace?.embedding) return { saved: false, facesDetected: faces.length };
-
-  for (const name of names) {
-    await saveNamedFace(fotoId, name, largestFace.embedding);
-  }
-  return { saved: true, facesDetected: faces.length };
+// Merkt sich den Fingerabdruck eines konkreten, bereits erkannten Gesichts
+// (siehe curiosityService.pickCuriosityQuestion) unter dem dafür genannten
+// Namen - pro Gesicht einzeln, damit bei mehreren Personen auf einem Foto
+// kein Name versehentlich dem falschen Gesicht zugeordnet wird. Liefert
+// zurück, ob tatsächlich gespeichert wurde (z. B. auf Android nie, da dort
+// kein Fingerabdruck berechnet wird).
+export async function saveNamedFaceEmbedding(fotoId: number, name: string, embedding: string | null): Promise<boolean> {
+  if (!supportsFaceMatching || !embedding) return false;
+  await saveNamedFace(fotoId, name, embedding);
+  return true;
 }
 
 // Prüft, ob ein Foto ein Gesicht enthält, das zu einem der übergebenen,

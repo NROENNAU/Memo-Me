@@ -33,8 +33,9 @@ import {
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
-import { captureNamedFaces, findTargetFacesForDescription, matchesNamedFace } from '../services/faceMatchingService';
+import { findTargetFacesForDescription, matchesNamedFace, saveNamedFaceEmbedding } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
+import { DetectedFace } from '../modules/face-recognition/src';
 import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
@@ -101,6 +102,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // Quiz (siehe goToNextPhoto) - entscheidet, ob nach der Antwort der
   // Fotoindex weiterspringen muss oder nicht.
   const [curiosityFromLoading, setCuriosityFromLoading] = useState(false);
+  // Bei der "Wer ist das?"-Frage: die noch abzufragenden Gesichter dieses
+  // Fotos (mehrere bei Gruppenfotos) und die dafür schon gesammelten Namen -
+  // so wird nacheinander pro Gesicht gefragt, statt blind zu raten, welcher
+  // Name zu welcher Person gehört.
+  const [curiosityFaceQueue, setCuriosityFaceQueue] = useState<DetectedFace[]>([]);
+  const [curiosityFaceTotal, setCuriosityFaceTotal] = useState(0);
+  const [curiosityCollectedNames, setCuriosityCollectedNames] = useState<string[]>([]);
   const [revealedMemory, setRevealedMemory] = useState<Memory | null>(null);
   const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
   const [currentAlbum, setCurrentAlbum] = useState<AlbumAssignment | null>(null);
@@ -115,6 +123,25 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       isMountedRef.current = false;
     };
   }, []);
+
+  // Aktiviert eine Wissensfrage (siehe curiosityService) und richtet bei der
+  // "Wer ist das?"-Frage gleich die Gesichter-Warteschlange ein, falls
+  // mehrere Personen auf dem Foto erkannt wurden.
+  function activateCuriosityQuestion(
+    fotoId: number,
+    photoUri: string,
+    question: CuriosityQuestion,
+    fromLoading: boolean
+  ) {
+    setCuriosityFotoId(fotoId);
+    setCuriosityPhotoUri(photoUri);
+    setCuriosityFromLoading(fromLoading);
+    setCuriosityQuestion(question);
+    const faces = question.kind === 'who' ? question.faces ?? [] : [];
+    setCuriosityFaceQueue(faces);
+    setCuriosityFaceTotal(faces.length);
+    setCuriosityCollectedNames([]);
+  }
 
   const loadQuiz = useCallback(async () => {
     setPhotos(null);
@@ -238,13 +265,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
           if (!hasCheckedCuriosity) {
             hasCheckedCuriosity = true;
-            const question = await pickCuriosityQuestion(fotoId);
+            const question = await pickCuriosityQuestion(fotoId, photo.uri);
             if (!isMountedRef.current) return;
             if (question) {
-              setCuriosityFotoId(fotoId);
-              setCuriosityPhotoUri(photo.uri);
-              setCuriosityFromLoading(true);
-              setCuriosityQuestion(question);
+              activateCuriosityQuestion(fotoId, photo.uri, question, true);
             }
           }
 
@@ -373,13 +397,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       try {
         const fotoId = await upsertPhoto(finishedItem.photo);
         if (!isMountedRef.current) return;
-        const question = await pickCuriosityQuestion(fotoId);
+        const question = await pickCuriosityQuestion(fotoId, finishedItem.photo.uri);
         if (!isMountedRef.current) return;
         if (question) {
-          setCuriosityFotoId(fotoId);
-          setCuriosityPhotoUri(finishedItem.photo.uri);
-          setCuriosityFromLoading(false);
-          setCuriosityQuestion(question);
+          activateCuriosityQuestion(fotoId, finishedItem.photo.uri, question, false);
           return;
         }
       } catch (error) {
@@ -390,58 +411,90 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setCurrentIndex((index) => index + 1);
   }
 
-  function handleCuriositySubmit(answer: { text: string | null; audioUri: string | null }) {
-    if (curiosityFotoId !== null && curiosityQuestion) {
-      if (curiosityQuestion.kind === 'story') {
-        saveMemory(curiosityFotoId, answer).catch((error) => {
-          console.error('Erinnerung konnte nicht gespeichert werden:', error);
-        });
-      } else if (curiosityQuestion.kind === 'who' && answer.text) {
-        const names = answer.text
-          .split(',')
-          .map((name) => name.trim())
-          .filter(Boolean);
-        if (names.length > 0) {
-          savePhotoTags(curiosityFotoId, names).catch((error) => {
-            console.error('Namen konnten nicht gespeichert werden:', error);
-          });
-          if (curiosityPhotoUri) {
-            captureNamedFaces(curiosityFotoId, curiosityPhotoUri, names)
-              .then((result) => {
-                // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode
-                // - danach wieder entfernen.
-                Alert.alert(
-                  'Debug: Gesichtserkennung',
-                  `${result.facesDetected} Gesicht(er) im Foto erkannt. ${
-                    result.saved ? 'Fingerabdruck gespeichert.' : 'Kein Fingerabdruck gespeichert.'
-                  }`
-                );
-              })
-              .catch((error) => {
-                console.error('Gesicht konnte nicht erfasst werden:', error);
-                Alert.alert('Debug: Gesichtserkennung fehlgeschlagen', String(error?.message ?? error));
-              });
-          }
-        }
-      }
-    }
+  // Beendet die aktuelle Wissensfrage komplett (alle Gesichter dieses Fotos
+  // abgefragt oder übersprungen) und schaltet den Fotoindex weiter, falls
+  // die Frage nicht während des Ladens, sondern zwischen zwei Fotos kam.
+  function finishCuriosity() {
     const wasFromLoading = curiosityFromLoading;
     setCuriosityQuestion(null);
     setCuriosityFotoId(null);
     setCuriosityPhotoUri(null);
+    setCuriosityFaceQueue([]);
+    setCuriosityCollectedNames([]);
     if (!wasFromLoading) {
       setCurrentIndex((index) => index + 1);
     }
   }
 
-  function handleCuriositySkip() {
-    const wasFromLoading = curiosityFromLoading;
-    setCuriosityQuestion(null);
-    setCuriosityFotoId(null);
-    setCuriosityPhotoUri(null);
-    if (!wasFromLoading) {
-      setCurrentIndex((index) => index + 1);
+  function handleCuriositySubmit(answer: { text: string | null; audioUri: string | null }) {
+    if (curiosityFotoId === null || !curiosityQuestion) {
+      finishCuriosity();
+      return;
     }
+
+    if (curiosityQuestion.kind === 'story') {
+      saveMemory(curiosityFotoId, answer).catch((error) => {
+        console.error('Erinnerung konnte nicht gespeichert werden:', error);
+      });
+      finishCuriosity();
+      return;
+    }
+
+    // kind === 'who': immer genau ein Name für das aktuell angezeigte
+    // Gesicht (siehe curiosityFaceQueue) - bei mehreren Personen auf dem
+    // Foto wird direkt danach nach dem nächsten Gesicht gefragt.
+    const name = answer.text?.trim() || null;
+    const face = curiosityFaceQueue[0] ?? null;
+    const collectedNames = name ? [...curiosityCollectedNames, name] : curiosityCollectedNames;
+
+    if (name && face) {
+      saveNamedFaceEmbedding(curiosityFotoId, name, face.embedding)
+        .then((saved) => {
+          // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode -
+          // danach wieder entfernen.
+          Alert.alert(
+            'Debug: Gesichtserkennung',
+            saved
+              ? `Fingerabdruck für „${name}“ gespeichert.`
+              : `Kein Fingerabdruck für „${name}“ gespeichert (auf Android aktuell nicht möglich).`
+          );
+        })
+        .catch((error) => {
+          console.error('Gesicht konnte nicht gespeichert werden:', error);
+        });
+    }
+
+    const remainingFaces = curiosityFaceQueue.slice(1);
+    if (remainingFaces.length > 0) {
+      setCuriosityFaceQueue(remainingFaces);
+      setCuriosityCollectedNames(collectedNames);
+      return;
+    }
+
+    if (collectedNames.length > 0) {
+      savePhotoTags(curiosityFotoId, collectedNames).catch((error) => {
+        console.error('Namen konnten nicht gespeichert werden:', error);
+      });
+    }
+    finishCuriosity();
+  }
+
+  function handleCuriositySkip() {
+    if (curiosityQuestion?.kind === 'who') {
+      const remainingFaces = curiosityFaceQueue.slice(1);
+      if (remainingFaces.length > 0) {
+        // Nur diese eine Person überspringen - bei weiteren Gesichtern auf
+        // demselben Foto trotzdem weiterfragen.
+        setCuriosityFaceQueue(remainingFaces);
+        return;
+      }
+      if (curiosityFotoId !== null && curiosityCollectedNames.length > 0) {
+        savePhotoTags(curiosityFotoId, curiosityCollectedNames).catch((error) => {
+          console.error('Namen konnten nicht gespeichert werden:', error);
+        });
+      }
+    }
+    finishCuriosity();
   }
 
   // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
@@ -587,6 +640,17 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
   };
   const headingText = question ? headingByType[question.type] : '';
+  // Bei "Wer ist das?" mit mehreren Personen: statt des ganzen Fotos wird
+  // der Ausschnitt des gerade abgefragten Gesichts gezeigt, damit eindeutig
+  // ist, welche Person gemeint ist.
+  const currentCuriosityFace = curiosityQuestion?.kind === 'who' ? curiosityFaceQueue[0] ?? null : null;
+  const curiosityDisplayUri = currentCuriosityFace?.thumbnail
+    ? `data:image/jpeg;base64,${currentCuriosityFace.thumbnail}`
+    : curiosityPhotoUri;
+  const curiositySubtitle =
+    curiosityQuestion?.kind === 'who' && curiosityFaceTotal > 1
+      ? `${curiosityQuestion.subtitle} (Person ${curiosityFaceTotal - curiosityFaceQueue.length + 1} von ${curiosityFaceTotal})`
+      : curiosityQuestion?.subtitle ?? '';
   const loadingMessage =
     source.type === 'custom'
       ? `Durchsuche deine Fotos nach „${source.description}“ … Das kann bei einer eigenen Auswahl etwas dauern.`
@@ -622,11 +686,14 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           </>
         )}
 
-        {!isLoading && !errorMessage && curiosityQuestion && curiosityPhotoUri && (
+        {!isLoading && !errorMessage && curiosityQuestion && curiosityDisplayUri && (
           <CuriosityPrompt
-            photoUri={curiosityPhotoUri}
+            // key sorgt für einen frischen Zustand (leeres Textfeld) beim
+            // Wechsel zum nächsten Gesicht auf demselben Foto.
+            key={`${curiosityFotoId}-${curiosityFaceQueue.length}`}
+            photoUri={curiosityDisplayUri}
             heading={curiosityQuestion.heading}
-            subtitle={curiosityQuestion.subtitle}
+            subtitle={curiositySubtitle}
             placeholder={curiosityQuestion.placeholder}
             allowVoice={curiosityQuestion.allowVoice}
             onSubmit={handleCuriositySubmit}

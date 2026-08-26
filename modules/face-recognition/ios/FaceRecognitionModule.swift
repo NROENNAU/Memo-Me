@@ -2,6 +2,7 @@ import ExpoModulesCore
 import Vision
 import ImageIO
 import CoreGraphics
+import UIKit
 
 // Wird geworfen, wenn sich aus der übergebenen URI kein Bild laden lässt
 // (z. B. eine ph://-Referenz statt eines echten Dateipfads).
@@ -84,6 +85,15 @@ private func cropToFace(_ image: CGImage, normalizedBox: CGRect) -> CGImage? {
   return image.cropping(to: pixelRect)
 }
 
+// Kleines JPEG des zugeschnittenen Gesichts, Base64-kodiert - damit die App
+// bei mehreren Personen auf einem Foto anzeigen kann, welches Gesicht
+// gerade benannt wird, statt raten zu müssen.
+private func encodeThumbnail(_ image: CGImage) -> String? {
+  let uiImage = UIImage(cgImage: image)
+  guard let data = uiImage.jpegData(compressionQuality: 0.7) else { return nil }
+  return data.base64EncodedString()
+}
+
 private func computeFeaturePrint(for image: CGImage) throws -> VNFeaturePrintObservation? {
   let request = VNGenerateImageFeaturePrintRequest()
   let handler = VNImageRequestHandler(cgImage: image, options: [:])
@@ -129,10 +139,12 @@ public class FaceRecognitionModule: Module {
         let topLeftBox = topLeftBoundingBox(from: observation.boundingBox)
 
         var embedding: String? = nil
-        if let croppedFace = cropToFace(image, normalizedBox: observation.boundingBox),
-          let featurePrint = try? computeFeaturePrint(for: croppedFace)
-        {
-          embedding = try? encodeEmbedding(featurePrint)
+        var thumbnail: String? = nil
+        if let croppedFace = cropToFace(image, normalizedBox: observation.boundingBox) {
+          if let featurePrint = try? computeFeaturePrint(for: croppedFace) {
+            embedding = try? encodeEmbedding(featurePrint)
+          }
+          thumbnail = encodeThumbnail(croppedFace)
         }
 
         return [
@@ -143,6 +155,7 @@ public class FaceRecognitionModule: Module {
             "height": topLeftBox.height,
           ],
           "embedding": embedding as Any,
+          "thumbnail": thumbnail as Any,
         ]
       }
     }

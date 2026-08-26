@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.media.ExifInterface
 import android.net.Uri
+import android.util.Base64
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
@@ -14,6 +16,7 @@ import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.Promise
+import java.io.ByteArrayOutputStream
 
 // Gesichtserkennung braucht mehr Auflösung als die reine Bildklassifikation
 // (siehe image-classifier), damit auch kleinere Gesichter im Bild noch
@@ -23,6 +26,34 @@ private const val MAX_THUMBNAIL_DIMENSION = 640
 // Mehr Gesichter pro Foto zu verarbeiten bringt für unseren Anwendungsfall
 // (eine benannte Person wiederfinden) keinen Mehrwert, kostet aber Zeit.
 private const val MAX_FACES_PER_PHOTO = 5
+
+// Wie viel Rand um die reine Gesichts-Bounding-Box beim Zuschneiden für das
+// Vorschaubild zusätzlich mitgenommen wird (siehe iOS-Pendant).
+private const val FACE_CROP_PADDING = 0.2
+
+// Schneidet das Gesicht (mit etwas Rand) aus dem Bitmap aus, für die
+// Vorschau beim Benennen mehrerer Personen auf einem Foto.
+private fun cropToFace(bitmap: Bitmap, box: Rect): Bitmap? {
+  val paddingX = (box.width() * FACE_CROP_PADDING).toInt()
+  val paddingY = (box.height() * FACE_CROP_PADDING).toInt()
+  val left = (box.left - paddingX).coerceIn(0, bitmap.width)
+  val top = (box.top - paddingY).coerceIn(0, bitmap.height)
+  val right = (box.right + paddingX).coerceIn(0, bitmap.width)
+  val bottom = (box.bottom + paddingY).coerceIn(0, bitmap.height)
+  val width = right - left
+  val height = bottom - top
+  if (width <= 0 || height <= 0) return null
+  return Bitmap.createBitmap(bitmap, left, top, width, height)
+}
+
+// Kleines JPEG des zugeschnittenen Gesichts, Base64-kodiert - damit die App
+// bei mehreren Personen auf einem Foto anzeigen kann, welches Gesicht
+// gerade benannt wird, statt raten zu müssen.
+private fun encodeThumbnail(bitmap: Bitmap): String {
+  val stream = ByteArrayOutputStream()
+  bitmap.compress(Bitmap.CompressFormat.JPEG, 70, stream)
+  return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
+}
 
 // Wird geworfen, wenn compareFaceEmbeddings auf Android aufgerufen wird -
 // hier gibt es (anders als auf iOS mit Apples Vision-Framework) keine
@@ -119,6 +150,7 @@ class FaceRecognitionModule : Module() {
             .take(MAX_FACES_PER_PHOTO)
             .map { face ->
               val box = face.boundingBox
+              val cropped = cropToFace(bitmap, box)
               mapOf(
                 "boundingBox" to mapOf(
                   "x" to (box.left.toDouble() / bitmap.width).coerceIn(0.0, 1.0),
@@ -126,7 +158,8 @@ class FaceRecognitionModule : Module() {
                   "width" to (box.width().toDouble() / bitmap.width),
                   "height" to (box.height().toDouble() / bitmap.height)
                 ),
-                "embedding" to null
+                "embedding" to null,
+                "thumbnail" to cropped?.let { encodeThumbnail(it) }
               )
             }
           promise.resolve(results)

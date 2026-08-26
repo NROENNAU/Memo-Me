@@ -12,7 +12,12 @@ export interface FaceBoundingBox {
 // interpretieren, nur über compareFaceEmbeddings vergleichen. Auf Android ist
 // er aktuell immer null, da dort keine eingebaute Wiedererkennungs-API
 // existiert (siehe Modul-Beschreibung).
+// `thumbnail` ist ein Base64-kodiertes JPEG des zugeschnittenen Gesichts
+// (ohne "data:"-Prefix) - für die Anzeige, welches Gesicht gerade benannt
+// wird, wenn mehrere Personen auf einem Foto zu sehen sind. Auf beiden
+// Plattformen vorhanden.
 export interface DetectedFace {
   boundingBox: FaceBoundingBox;
   embedding: string | null;
+  thumbnail: string | null;
 }
