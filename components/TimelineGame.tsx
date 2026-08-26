@@ -12,71 +12,91 @@ import { colors, radius, spacing, typography, MIN_TOUCH_TARGET } from '../theme'
 interface TimelineGameProps {
   items: TimelineItem[];
   onSubmit: (isCorrect: boolean) => void;
+  // Von außen erzwungene Auswertung (z. B. weil der Timer abgelaufen ist),
+  // auch wenn noch nicht alle Fotos einsortiert wurden.
+  forceReveal?: boolean;
 }
 
-export function TimelineGame({ items, onSubmit }: TimelineGameProps) {
+export function TimelineGame({ items, onSubmit, forceReveal = false }: TimelineGameProps) {
   const [assignedOrder, setAssignedOrder] = useState<number[]>([]);
   const hasSubmittedRef = useRef(false);
 
   const isComplete = assignedOrder.length === items.length;
+  const isRevealed = isComplete || forceReveal;
   const correctOrder = items
     .map((_, index) => index)
     .sort((a, b) => items[a].timestamp - items[b].timestamp);
 
   useEffect(() => {
-    if (isComplete && !hasSubmittedRef.current) {
+    if (isRevealed && !hasSubmittedRef.current) {
       hasSubmittedRef.current = true;
-      const isCorrect = assignedOrder.every((itemIndex, position) => itemIndex === correctOrder[position]);
+      const isCorrect =
+        isComplete && assignedOrder.every((itemIndex, position) => itemIndex === correctOrder[position]);
       onSubmit(isCorrect);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isComplete]);
+  }, [isRevealed]);
 
+  // Tippt man ein bereits einsortiertes Foto erneut an, wird es wieder
+  // herausgenommen - so lässt sich ein Fehltipp korrigieren, ohne die ganze
+  // Reihenfolge zurückzusetzen.
   function handleTap(itemIndex: number) {
-    if (isComplete || assignedOrder.includes(itemIndex)) return;
-    setAssignedOrder((previous) => [...previous, itemIndex]);
+    if (isRevealed) return;
+    setAssignedOrder((previous) =>
+      previous.includes(itemIndex) ? previous.filter((index) => index !== itemIndex) : [...previous, itemIndex]
+    );
   }
 
   function handleReset() {
-    if (isComplete) return;
+    if (isRevealed) return;
     setAssignedOrder([]);
   }
 
   return (
     <View style={styles.container}>
       <Text style={styles.subtitle}>
-        {isComplete
+        {isRevealed
           ? 'Richtige Reihenfolge:'
-          : 'Tippe die Fotos in der zeitlichen Reihenfolge an – ältestes zuerst.'}
+          : 'Tippe die Fotos in der zeitlichen Reihenfolge an – ältestes zuerst. Nochmal antippen korrigiert.'}
       </Text>
       <View style={styles.grid}>
         {items.map((item, itemIndex) => {
           const position = assignedOrder.indexOf(itemIndex);
           const correctPosition = correctOrder.indexOf(itemIndex);
-          const isCorrectSpot = isComplete && position === correctPosition;
+          const isCorrectSpot = isRevealed && position !== -1 && position === correctPosition;
 
           return (
             <Pressable
               key={item.uri}
-              style={[styles.tile, isComplete && (isCorrectSpot ? styles.tileCorrect : styles.tileWrong)]}
+              style={[
+                styles.tile,
+                isRevealed && position !== -1 && (isCorrectSpot ? styles.tileCorrect : styles.tileWrong),
+              ]}
               onPress={() => handleTap(itemIndex)}
-              disabled={isComplete}
+              disabled={isRevealed}
               accessibilityRole="button"
               accessibilityLabel={`Foto ${itemIndex + 1}${position !== -1 ? `, Position ${position + 1}` : ''}`}
             >
               <Image source={{ uri: item.uri }} style={styles.tileImage} contentFit="cover" />
-              {position !== -1 && !isComplete && (
+              {position !== -1 && !isRevealed && (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>{position + 1}</Text>
                 </View>
               )}
-              {isComplete && (
-                <View style={[styles.resultOverlay, isCorrectSpot ? styles.resultCorrect : styles.resultWrong]}>
-                  <Ionicons
-                    name={isCorrectSpot ? 'checkmark-circle' : 'close-circle'}
-                    size={22}
-                    color={colors.textOnPrimary}
-                  />
+              {isRevealed && (
+                <View
+                  style={[
+                    styles.resultOverlay,
+                    position === -1 ? styles.resultNeutral : isCorrectSpot ? styles.resultCorrect : styles.resultWrong,
+                  ]}
+                >
+                  {position !== -1 && (
+                    <Ionicons
+                      name={isCorrectSpot ? 'checkmark-circle' : 'close-circle'}
+                      size={22}
+                      color={colors.textOnPrimary}
+                    />
+                  )}
                   <Text style={styles.yearLabel}>{item.year}</Text>
                 </View>
               )}
@@ -84,7 +104,7 @@ export function TimelineGame({ items, onSubmit }: TimelineGameProps) {
           );
         })}
       </View>
-      {!isComplete && assignedOrder.length > 0 && (
+      {!isRevealed && assignedOrder.length > 0 && (
         <Pressable
           style={styles.resetButton}
           onPress={handleReset}
@@ -165,6 +185,9 @@ const styles = StyleSheet.create({
   },
   resultWrong: {
     backgroundColor: 'rgba(225,35,78,0.85)',
+  },
+  resultNeutral: {
+    backgroundColor: 'rgba(107,114,128,0.85)',
   },
   yearLabel: {
     ...typography.caption,

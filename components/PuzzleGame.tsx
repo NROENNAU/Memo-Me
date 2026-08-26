@@ -13,6 +13,9 @@ interface PuzzleGameProps {
   photoUri: string;
   gridSize: number;
   onSolved: () => void;
+  // Von außen erzwungenes Sperren (z. B. weil der Timer abgelaufen ist),
+  // auch wenn das Puzzle noch nicht gelöst ist.
+  disabled?: boolean;
 }
 
 function createShuffledOrder(pieceCount: number): number[] {
@@ -29,7 +32,7 @@ function createShuffledOrder(pieceCount: number): number[] {
   return shuffled;
 }
 
-export function PuzzleGame({ photoUri, gridSize, onSolved }: PuzzleGameProps) {
+export function PuzzleGame({ photoUri, gridSize, onSolved, disabled = false }: PuzzleGameProps) {
   const pieceCount = gridSize * gridSize;
   const [order, setOrder] = useState<number[]>(() => createShuffledOrder(pieceCount));
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
@@ -41,7 +44,7 @@ export function PuzzleGame({ photoUri, gridSize, onSolved }: PuzzleGameProps) {
   }
 
   function handleTilePress(position: number) {
-    if (isSolved) return;
+    if (isSolved || disabled) return;
 
     if (selectedPosition === null) {
       setSelectedPosition(position);
@@ -88,7 +91,7 @@ export function PuzzleGame({ photoUri, gridSize, onSolved }: PuzzleGameProps) {
                 selectedPosition === position && styles.tileSelected,
               ]}
               onPress={() => handleTilePress(position)}
-              disabled={isSolved}
+              disabled={isSolved || disabled}
               accessibilityRole="button"
               accessibilityLabel={`Puzzleteil an Position ${position + 1}`}
             >

@@ -47,6 +47,7 @@ import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository'
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
 import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
+import { getProfile } from '../db/profileRepository';
 import { LibraryPhoto } from '../types/Photo';
 import { RootStackParamList } from '../types/navigation';
 import { colors, spacing, radius, typography } from '../theme';
@@ -134,6 +135,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode - danach
   // wieder entfernen.
   const [debugFaceInfo, setDebugFaceInfo] = useState<string | null>(null);
+  // Timer pro Quizfrage, Dauer aus den Nutzereinstellungen (Profil). null =
+  // noch nicht geladen; 0 = in den Einstellungen abgeschaltet.
+  const [timerDuration, setTimerDuration] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  // Erhöht sich bei jedem (Neu-)Start einer Runde, damit der Timer auch dann
+  // zurückgesetzt wird, wenn currentIndex zufällig schon 0 war.
+  const [quizRunId, setQuizRunId] = useState(0);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -141,6 +149,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     return () => {
       isMountedRef.current = false;
     };
+  }, []);
+
+  useEffect(() => {
+    getProfile().then((profile) => {
+      if (isMountedRef.current) setTimerDuration(profile.timerSeconds);
+    });
   }, []);
 
   // Aktiviert eine Wissensfrage (siehe curiosityService) und richtet bei der
@@ -170,6 +184,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setCuriosityPhotoUri(null);
     setErrorMessage(null);
     setDebugFaceInfo(null);
+    setQuizRunId((id) => id + 1);
 
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
@@ -375,6 +390,38 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     return null;
   }, [currentItem, photos, currentIndex]);
 
+  // Ob gerade tatsächlich eine unbeantwortete Frage sichtbar ist - der Timer
+  // (siehe unten) läuft nur währenddessen, nicht beim Laden, während einer
+  // Zwischenfrage oder nachdem schon geantwortet wurde.
+  const isQuestionActive =
+    photos !== null && !errorMessage && !curiosityQuestion && currentItem !== null && question !== null && !isRevealed;
+
+  // Setzt den Timer auf die eingestellte Dauer zurück, sobald eine neue
+  // Frage drankommt (neuer Fotoindex oder komplett neue Runde). timerDuration
+  // 0 bedeutet "kein Timer" (siehe Einstellungen).
+  useEffect(() => {
+    if (timerDuration === null) return;
+    setTimeLeft(timerDuration > 0 ? timerDuration : null);
+  }, [currentIndex, quizRunId, timerDuration]);
+
+  // Zählt jede Sekunde herunter, aber nur während die Frage aktiv ist -
+  // dadurch pausiert der Timer automatisch beim Laden oder nach dem Antworten.
+  useEffect(() => {
+    if (timeLeft === null || timeLeft <= 0 || !isQuestionActive) return;
+    const timeout = setTimeout(() => {
+      setTimeLeft((previous) => (previous !== null ? previous - 1 : previous));
+    }, 1000);
+    return () => clearTimeout(timeout);
+  }, [timeLeft, isQuestionActive]);
+
+  // Läuft die Zeit ab, ohne dass geantwortet wurde, zählt das als falsch.
+  useEffect(() => {
+    if (timeLeft === 0 && isQuestionActive) {
+      handleTimeout();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft]);
+
   // Prüft für das aktuelle Foto, ob es schon einem Album zugeordnet ist –
   // erst der schnelle, eigene Cache (FotoAlben), und nur falls dort nichts
   // bekannt ist, zusätzlich ein echter Abgleich mit allen Alben der
@@ -570,6 +617,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   function handleTimelineSubmit(isCorrect: boolean) {
     if (!currentItem || isRevealed) return;
     finalizeAnswer('TIMELINE', isCorrect);
+  }
+
+  // Läuft der Timer ab, ohne dass geantwortet wurde, zählt die Frage als
+  // falsch beantwortet - unabhängig vom Fragetyp.
+  function handleTimeout() {
+    if (!currentItem || !question || isRevealed) return;
+    finalizeAnswer(question.type, false);
   }
 
   function handleDeletePhoto() {
@@ -779,6 +833,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && !curiosityQuestion && !isFinished && currentItem && question && (
           <>
+            {timeLeft !== null && !isRevealed && (
+              <Text style={[styles.timerText, timeLeft <= 5 && styles.timerTextUrgent]}>⏱ {timeLeft}s</Text>
+            )}
             {question.type === 'PUZZLE' ? (
               <>
                 <Text style={styles.heading}>{headingText}</Text>
@@ -787,6 +844,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                   photoUri={question.photoUri}
                   gridSize={question.gridSize}
                   onSolved={handlePuzzleSolved}
+                  disabled={isRevealed}
                 />
                 {isRevealed && (
                   <PhotoActions
@@ -800,7 +858,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             ) : question.type === 'TIMELINE' ? (
               <>
                 <Text style={styles.heading}>{headingText}</Text>
-                <TimelineGame key={currentItem.photo.uri} items={question.items} onSubmit={handleTimelineSubmit} />
+                <TimelineGame
+                  key={currentItem.photo.uri}
+                  items={question.items}
+                  onSubmit={handleTimelineSubmit}
+                  forceReveal={isRevealed}
+                />
                 {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
               </>
             ) : (
@@ -888,6 +951,14 @@ const styles = StyleSheet.create({
     ...typography.heading,
     color: colors.textPrimary,
     textAlign: 'center',
+  },
+  timerText: {
+    ...typography.heading,
+    color: colors.primary,
+    textAlign: 'center',
+  },
+  timerTextUrgent: {
+    color: colors.danger,
   },
   photoWrapper: {
     width: '100%',

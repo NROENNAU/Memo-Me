@@ -50,6 +50,7 @@ export async function initDatabase(): Promise<void> {
   await ensureColumn(database, 'Erinnerungen', 'audio_uri', 'TEXT');
   await database.execAsync(CREATE_FOTO_ALBEN_TABLE);
   await database.execAsync(CREATE_PROFIL_TABLE);
+  await ensureColumn(database, 'Profil', 'timer_dauer', 'INTEGER');
   await database.execAsync(CREATE_FOTO_KLASSIFIKATION_TABLE);
   await database.execAsync(CREATE_GESICHTER_TABLE);
 }

@@ -14,11 +14,15 @@ import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme'
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
 const AVATAR_SIZE = 120;
+// In diesen Schritten lässt sich der Timer verstellen, von 0 (aus) bis 60s.
+const TIMER_STEP_SECONDS = 5;
+const MAX_TIMER_SECONDS = 60;
 
 export function SettingsScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [nickname, setNickname] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState(0);
 
   useEffect(() => {
     let isActive = true;
@@ -26,12 +30,17 @@ export function SettingsScreen({ navigation }: Props) {
       if (!isActive) return;
       setNickname(profile.nickname ?? '');
       setAvatarUri(profile.avatarUri);
+      setTimerSeconds(profile.timerSeconds);
       setIsLoading(false);
     });
     return () => {
       isActive = false;
     };
   }, []);
+
+  function handleAdjustTimer(delta: number) {
+    setTimerSeconds((previous) => Math.max(0, Math.min(MAX_TIMER_SECONDS, previous + delta)));
+  }
 
   async function handlePickAvatar() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -57,7 +66,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   async function handleSave() {
     try {
-      await saveProfile({ nickname: nickname.trim() || null, avatarUri });
+      await saveProfile({ nickname: nickname.trim() || null, avatarUri, timerSeconds });
       navigation.goBack();
     } catch (error) {
       console.error('Profil konnte nicht gespeichert werden:', error);
@@ -112,6 +121,29 @@ export function SettingsScreen({ navigation }: Props) {
               onChangeText={setNickname}
               accessibilityLabel="Dein Spitzname"
             />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Zeit pro Quizfrage</Text>
+            <View style={styles.timerRow}>
+              <Pressable
+                style={styles.timerButton}
+                onPress={() => handleAdjustTimer(-TIMER_STEP_SECONDS)}
+                accessibilityRole="button"
+                accessibilityLabel="Timer verkürzen"
+              >
+                <Ionicons name="remove" size={20} color={colors.primary} />
+              </Pressable>
+              <Text style={styles.timerValue}>{timerSeconds === 0 ? 'Aus' : `${timerSeconds}s`}</Text>
+              <Pressable
+                style={styles.timerButton}
+                onPress={() => handleAdjustTimer(TIMER_STEP_SECONDS)}
+                accessibilityRole="button"
+                accessibilityLabel="Timer verlängern"
+              >
+                <Ionicons name="add" size={20} color={colors.primary} />
+              </Pressable>
+            </View>
           </View>
 
           <Pressable
@@ -202,6 +234,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     color: colors.textPrimary,
     paddingHorizontal: spacing.md,
+  },
+  timerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+  },
+  timerButton: {
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    borderRadius: MIN_TOUCH_TARGET / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  timerValue: {
+    ...typography.heading,
+    color: colors.textPrimary,
+    minWidth: 60,
+    textAlign: 'center',
   },
   saveButton: {
     width: '100%',
