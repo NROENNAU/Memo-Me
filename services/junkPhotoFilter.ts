@@ -41,6 +41,34 @@ export function isJunkLabels(labels: ImageLabel[]): boolean {
   });
 }
 
+// Schlagwörter, die in den erkannten Labels auf Menschen im Bild hindeuten
+// (Apple Vision und Google ML Kit liefern beide meist "person"/"people",
+// teils spezifischere wie "portrait" oder "selfie"). Genutzt, um Fragen wie
+// die Zeitleiste auf Fotos mit Menschen zu beschränken - Landschafts- oder
+// Gegenstandsfotos sind dafür weniger einprägsam/schwerer einzuordnen.
+const PERSON_LABEL_KEYWORDS = [
+  'person',
+  'people',
+  'human',
+  'portrait',
+  'selfie',
+  'face',
+  'child',
+  'baby',
+  'man',
+  'woman',
+  'crowd',
+];
+const MIN_PERSON_CONFIDENCE = 0.4;
+
+export function hasPersonLabel(labels: ImageLabel[]): boolean {
+  return labels.some((label) => {
+    if (label.confidence < MIN_PERSON_CONFIDENCE) return false;
+    const identifier = label.identifier.toLowerCase();
+    return PERSON_LABEL_KEYWORDS.some((keyword) => identifier.includes(keyword));
+  });
+}
+
 // Erkennt Screenshots über vorhandene Mediathek-Metadaten - zuverlässiger
 // und deutlich günstiger als eine ML-Klassifikation, deshalb als erster Filter.
 export function isLikelyScreenshot(candidate: { filename?: string; mediaSubtypes?: string[] }): boolean {

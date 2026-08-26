@@ -150,8 +150,11 @@ const TIMELINE_ITEM_COUNT = 4;
 
 export interface TimelineItem {
   uri: string;
+  // Volles Aufnahmedatum (Unix-Millisekunden) - sowohl für die eigentliche
+  // chronologische Reihenfolge als auch für die Tag-genaue Anzeige nach
+  // dem Auswerten nötig, ein reines Jahr würde bei Fotos aus demselben
+  // Jahr nicht ausreichen.
   timestamp: number;
-  year: number;
 }
 
 export interface TimelineQuestion {
@@ -179,7 +182,6 @@ export function buildTimelineQuestion(
   const items = [currentPhoto, ...chosenOthers].map((photo) => ({
     uri: photo.uri,
     timestamp: photo.creationTime as number,
-    year: new Date(photo.creationTime as number).getFullYear(),
   }));
 
   return { items: shuffle(items) };

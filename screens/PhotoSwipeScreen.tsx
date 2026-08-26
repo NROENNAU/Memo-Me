@@ -36,7 +36,7 @@ import {
   shuffle,
   TimelineItem,
 } from '../services/quizService';
-import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
+import { classifyPhoto, hasPersonLabel, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
 import { findTargetFacesForDescription, matchesNamedFace, saveNamedFaceEmbedding } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
@@ -76,6 +76,10 @@ interface QuizPhoto {
   locationName: string | null;
   tags: string[] | null;
   memoryText: string | null;
+  // Ob laut Bildklassifikation Menschen auf dem Foto zu sehen sind - die
+  // Zeitleisten-Frage nutzt nur solche Fotos, da sie sich damit leichter
+  // zeitlich einordnen lassen als Landschafts-/Gegenstandsfotos.
+  hasPerson: boolean;
 }
 
 type ChoiceQuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
@@ -306,7 +310,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             }
           }
 
-          quizPhotos.push({ photo, locationName, tags, memoryText: memory?.text ?? null });
+          quizPhotos.push({
+            photo,
+            locationName,
+            tags,
+            memoryText: memory?.text ?? null,
+            hasPerson: hasPersonLabel(labels),
+          });
 
           if (!hasRevealedQuiz) {
             hasRevealedQuiz = true;
@@ -370,9 +380,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
       },
       () => {
+        // Nur Fotos mit Menschen - Landschafts-/Gegenstandsfotos lassen sich
+        // in der Zeitleiste schwerer zeitlich einordnen.
+        if (!currentItem.hasPerson) return null;
         const timeline = buildTimelineQuestion(
           currentItem.photo,
-          others.map((item) => item.photo)
+          others.filter((item) => item.hasPerson).map((item) => item.photo)
         );
         return timeline ? { type: 'TIMELINE', items: timeline.items } : null;
       },

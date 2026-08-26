@@ -9,6 +9,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { TimelineItem } from '../services/quizService';
 import { colors, radius, spacing, typography, MIN_TOUCH_TARGET } from '../theme';
 
+// Volles Datum statt nur Jahr, damit beim Auswerten auch bei Fotos aus
+// demselben Jahr klar ist, welches wirklich früher/später aufgenommen wurde.
+function formatDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
 interface TimelineGameProps {
   items: TimelineItem[];
   onSubmit: (isCorrect: boolean) => void;
@@ -97,7 +107,7 @@ export function TimelineGame({ items, onSubmit, forceReveal = false }: TimelineG
                       color={colors.textOnPrimary}
                     />
                   )}
-                  <Text style={styles.yearLabel}>{item.year}</Text>
+                  <Text style={styles.yearLabel}>{formatDate(item.timestamp)}</Text>
                 </View>
               )}
             </Pressable>
