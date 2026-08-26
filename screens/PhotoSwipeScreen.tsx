@@ -43,6 +43,7 @@ import {
   buildZuordnungQuestion,
   MatchPair,
   MemoryCard,
+  PhotoChoiceQuestion,
   shuffle,
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
@@ -457,48 +458,50 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
       },
       () => {
+        // Alle vier "Foto-Auswahl"-Varianten zählen hier als EIN Los im
+        // Fragetyp-Lostopf (nicht vier) - sonst würde dieser Fragetyp allein
+        // durch seine vier Untervarianten viel häufiger gezogen als alle
+        // anderen, die nur eine Variante haben. Innerhalb dieses einen Loses
+        // wird zufällig unter den vier Varianten probiert.
+        //
         // Distraktoren kommen aus dem Reservoir statt aus den anderen Fotos
         // dieser Runde, damit über die ganze Runde hinweg kein Foto doppelt
         // gezeigt wird (siehe RESERVOIR_SIZE oben) - schon genutzte
         // Reservoir-Fotos scheiden dafür aus.
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const dateChoice = buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'oldest');
-        if (!dateChoice) return null;
-        dateChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
-        return { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri };
-      },
-      () => {
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const dateChoice = buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'newest');
-        if (!dateChoice) return null;
-        dateChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
-        return { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri };
-      },
-      () => {
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
-        const locationChoice = buildLocationChoiceQuestion(candidates, 'match');
-        if (!locationChoice) return null;
-        locationChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
-        return {
-          type: 'FOTO_AUSWAHL',
-          prompt: locationChoice.prompt,
-          options: locationChoice.options,
-          correctOption: locationChoice.correctUri,
-        };
-      },
-      () => {
-        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
-        const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
-        const locationChoice = buildLocationChoiceQuestion(candidates, 'mismatch');
-        if (!locationChoice) return null;
-        locationChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
-        return {
-          type: 'FOTO_AUSWAHL',
-          prompt: locationChoice.prompt,
-          options: locationChoice.options,
-          correctOption: locationChoice.correctUri,
-        };
+        const fotoAuswahlVarianten: Array<() => PhotoChoiceQuestion | null> = [
+          () => {
+            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+            return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'oldest');
+          },
+          () => {
+            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+            return buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'newest');
+          },
+          () => {
+            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+            const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
+            return buildLocationChoiceQuestion(candidates, 'match');
+          },
+          () => {
+            const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+            const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
+            return buildLocationChoiceQuestion(candidates, 'mismatch');
+          },
+        ];
+
+        for (const variant of shuffle(fotoAuswahlVarianten)) {
+          const photoChoice = variant();
+          if (photoChoice) {
+            photoChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+            return {
+              type: 'FOTO_AUSWAHL',
+              prompt: photoChoice.prompt,
+              options: photoChoice.options,
+              correctOption: photoChoice.correctUri,
+            };
+          }
+        }
+        return null;
       },
       () => {
         const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
