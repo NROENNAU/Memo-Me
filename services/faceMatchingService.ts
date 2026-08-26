@@ -13,21 +13,33 @@ import { extractRawWords } from './customSourceFilter';
 // echter Nutzung nachjustiert werden.
 const FACE_MATCH_DISTANCE_THRESHOLD = 0.6;
 
+export interface CaptureFacesResult {
+  saved: boolean;
+  facesDetected: number;
+}
+
 // Merkt sich zusätzlich zum Namen (siehe savePhotoTags) einen
 // Gesichts-Fingerabdruck des größten erkannten Gesichts auf dem Foto, damit
 // dieselbe Person später auf anderen Fotos wiedergefunden werden kann.
-export async function captureNamedFaces(fotoId: number, photoUri: string, names: string[]): Promise<void> {
-  if (!supportsFaceMatching || names.length === 0) return;
+// Liefert Diagnose-Infos zurück (wie viele Gesichter erkannt wurden, ob
+// gespeichert wurde), damit sich Ausbleiben eines Treffers nachvollziehen lässt.
+export async function captureNamedFaces(
+  fotoId: number,
+  photoUri: string,
+  names: string[]
+): Promise<CaptureFacesResult> {
+  if (!supportsFaceMatching || names.length === 0) return { saved: false, facesDetected: 0 };
 
   const faces = await detectFaces(photoUri);
   const largestFace = faces
     .filter((face) => face.embedding !== null)
     .sort((a, b) => b.boundingBox.width * b.boundingBox.height - a.boundingBox.width * a.boundingBox.height)[0];
-  if (!largestFace?.embedding) return;
+  if (!largestFace?.embedding) return { saved: false, facesDetected: faces.length };
 
   for (const name of names) {
     await saveNamedFace(fotoId, name, largestFace.embedding);
   }
+  return { saved: true, facesDetected: faces.length };
 }
 
 // Prüft, ob ein Foto ein Gesicht enthält, das zu einem der übergebenen,

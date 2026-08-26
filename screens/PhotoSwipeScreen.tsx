@@ -35,7 +35,7 @@ import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/jun
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
 import { captureNamedFaces, findTargetFacesForDescription, matchesNamedFace } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
-import { NamedFace } from '../db/faceRepository';
+import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
@@ -104,6 +104,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [revealedMemory, setRevealedMemory] = useState<Memory | null>(null);
   const [isAlbumPickerOpen, setIsAlbumPickerOpen] = useState(false);
   const [currentAlbum, setCurrentAlbum] = useState<AlbumAssignment | null>(null);
+  // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode - danach
+  // wieder entfernen.
+  const [debugFaceInfo, setDebugFaceInfo] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -120,6 +123,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setCuriosityFotoId(null);
     setCuriosityPhotoUri(null);
     setErrorMessage(null);
+    setDebugFaceInfo(null);
 
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
@@ -146,8 +150,19 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       // Bei "Eigene Auswahl" schon einmal benannte Gesichter (siehe "Wer ist
       // das?") heranziehen, deren Name zur Beschreibung passt (z. B.
       // "Daria") - einmal pro Suche geladen, nicht pro Foto.
-      const targetNamedFaces: NamedFace[] =
-        source.type === 'custom' ? await findTargetFacesForDescription(source.description) : [];
+      let targetNamedFaces: NamedFace[] = [];
+      if (source.type === 'custom') {
+        const [allNamedFaces, filtered] = await Promise.all([
+          getNamedFaces(),
+          findTargetFacesForDescription(source.description),
+        ]);
+        targetNamedFaces = filtered;
+        // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode - danach
+        // wieder entfernen.
+        setDebugFaceInfo(
+          `Debug: ${allNamedFaces.length} bekannte Gesichter insgesamt, ${filtered.length} passend zu „${source.description}“.`
+        );
+      }
       if (!isMountedRef.current) return;
 
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
@@ -391,9 +406,21 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             console.error('Namen konnten nicht gespeichert werden:', error);
           });
           if (curiosityPhotoUri) {
-            captureNamedFaces(curiosityFotoId, curiosityPhotoUri, names).catch((error) => {
-              console.error('Gesicht konnte nicht erfasst werden:', error);
-            });
+            captureNamedFaces(curiosityFotoId, curiosityPhotoUri, names)
+              .then((result) => {
+                // TEMPORÄR zum Debuggen der Gesichtserkennung ohne Mac/Xcode
+                // - danach wieder entfernen.
+                Alert.alert(
+                  'Debug: Gesichtserkennung',
+                  `${result.facesDetected} Gesicht(er) im Foto erkannt. ${
+                    result.saved ? 'Fingerabdruck gespeichert.' : 'Kein Fingerabdruck gespeichert.'
+                  }`
+                );
+              })
+              .catch((error) => {
+                console.error('Gesicht konnte nicht erfasst werden:', error);
+                Alert.alert('Debug: Gesichtserkennung fehlgeschlagen', String(error?.message ?? error));
+              });
           }
         }
       }
@@ -578,11 +605,14 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         {!isLoading && errorMessage && <Text style={styles.statusText}>{errorMessage}</Text>}
 
         {!isLoading && !errorMessage && isSearchComplete && photos?.length === 0 && (
-          <Text style={styles.statusText}>
-            {source.type === 'custom'
-              ? `Keine Fotos zu „${source.description}“ gefunden. Versuch es mit einer anderen Beschreibung.`
-              : 'In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum, ohne Screenshots/Belege).'}
-          </Text>
+          <>
+            <Text style={styles.statusText}>
+              {source.type === 'custom'
+                ? `Keine Fotos zu „${source.description}“ gefunden. Versuch es mit einer anderen Beschreibung.`
+                : 'In deiner Mediathek wurden keine passenden Fotos gefunden (mit Aufnahmedatum, ohne Screenshots/Belege).'}
+            </Text>
+            {debugFaceInfo && <Text style={styles.statusText}>{debugFaceInfo}</Text>}
+          </>
         )}
 
         {isWaitingForMore && (
