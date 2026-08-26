@@ -20,7 +20,6 @@ import { PhotoAnswerOptions } from '../components/PhotoAnswerOptions';
 import { MemoryGame } from '../components/MemoryGame';
 import { MatchGame } from '../components/MatchGame';
 import { MapGuessGame } from '../components/MapGuessGame';
-import { YearSliderGame } from '../components/YearSliderGame';
 import { ScoreRing } from '../components/ScoreRing';
 import {
   addPhotosToAlbum,
@@ -39,7 +38,6 @@ import {
   buildPaarchenQuestion,
   buildPuzzleQuestion,
   buildWannQuestion,
-  buildWannReglerQuestion,
   buildWerQuestion,
   buildWoQuestion,
   buildZuordnungQuestion,
@@ -109,8 +107,7 @@ type QuestionKind =
   | 'FOTO_AUSWAHL'
   | 'PAARCHEN'
   | 'ZUORDNUNG'
-  | 'KARTE'
-  | 'WANN_REGLER';
+  | 'KARTE';
 
 interface ChoiceQuestion {
   type: ChoiceQuestionKind;
@@ -141,14 +138,6 @@ interface KarteQuestionView {
   targetLongitude: number;
 }
 
-interface WannReglerQuestionView {
-  type: 'WANN_REGLER';
-  photoUri: string;
-  correctYear: number;
-  minYear: number;
-  maxYear: number;
-}
-
 interface PhotoChoiceQuestionView {
   type: 'FOTO_AUSWAHL';
   prompt: string;
@@ -162,8 +151,7 @@ type Question =
   | PhotoChoiceQuestionView
   | PaarchenQuestionView
   | ZuordnungQuestionView
-  | KarteQuestionView
-  | WannReglerQuestionView;
+  | KarteQuestionView;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
@@ -537,18 +525,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             }
           : null;
       },
-      () => {
-        const wannRegler = buildWannReglerQuestion(currentItem.photo);
-        return wannRegler
-          ? {
-              type: 'WANN_REGLER',
-              photoUri: currentItem.photo.uri,
-              correctYear: wannRegler.correctYear,
-              minYear: wannRegler.minYear,
-              maxYear: wannRegler.maxYear,
-            }
-          : null;
-      },
     ];
 
     for (const build of shuffle(builders)) {
@@ -821,13 +797,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     finalizeAnswer('KARTE', isCorrect);
   }
 
-  // Der Jahres-Regler wertet sich selbst aus (siehe YearSliderGame) und
-  // meldet hier nur noch, ob das geschätzte Jahr genau stimmte.
-  function handleYearSliderSubmit(_guessedYear: number, isCorrect: boolean) {
-    if (!currentItem || isRevealed) return;
-    finalizeAnswer('WANN_REGLER', isCorrect);
-  }
-
   // Läuft der Timer ab, ohne dass geantwortet wurde, zählt die Frage als
   // falsch beantwortet - unabhängig vom Fragetyp.
   function handleTimeout() {
@@ -980,7 +949,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     PAARCHEN: 'Finde die Bildpaare!',
     ZUORDNUNG: 'Wer gehört zu wem?',
     KARTE: 'Wo wurde das Foto aufgenommen?',
-    WANN_REGLER: 'Wann wurde dieses Foto aufgenommen?',
   };
   // Bei "Foto-Auswahl" ist die Überschrift dynamisch (z. B. "Welches Foto
   // ist aus Barcelona?"), bei allen anderen Fragetypen fest.
@@ -1003,16 +971,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <Pressable
-        style={styles.exitButton}
-        onPress={startDifferentQuiz}
-        accessibilityRole="button"
-        accessibilityLabel="Quiz beenden"
-        hitSlop={spacing.sm}
-      >
-        <Ionicons name="close" size={20} color={colors.textPrimary} />
-        <Text style={styles.exitButtonText}>Beenden</Text>
-      </Pressable>
       <View style={styles.content} {...panResponder.panHandlers}>
         {isLoading && (
           <>
@@ -1153,37 +1111,6 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                 />
                 {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
               </>
-            ) : question.type === 'WANN_REGLER' ? (
-              <>
-                {isRevealed ? (
-                  <PhotoActions
-                    onDelete={handleDeletePhoto}
-                    onAddToAlbum={handleOpenAlbumPicker}
-                    onToggleFavorite={handleToggleFavorite}
-                    isFavorite={isCurrentFavorite}
-                    albumLabel={currentAlbum?.albumTitle}
-                  />
-                ) : (
-                  <Text style={styles.heading}>{headingText}</Text>
-                )}
-                <View style={styles.photoWrapper}>
-                  <Image
-                    source={{ uri: currentItem.photo.uri }}
-                    style={styles.photo}
-                    contentFit="cover"
-                    accessibilityLabel="Ein Foto aus deiner Mediathek"
-                  />
-                </View>
-                <YearSliderGame
-                  key={currentItem.photo.uri}
-                  minYear={question.minYear}
-                  maxYear={question.maxYear}
-                  correctYear={question.correctYear}
-                  onSubmit={handleYearSliderSubmit}
-                  disabled={isRevealed}
-                />
-                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
-              </>
             ) : (
               <>
                 {isRevealed ? (
@@ -1237,6 +1164,17 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         )}
       </View>
 
+      <Pressable
+        style={styles.exitButton}
+        onPress={startDifferentQuiz}
+        accessibilityRole="button"
+        accessibilityLabel="Quiz beenden"
+        hitSlop={{ top: spacing.md, bottom: spacing.md, left: spacing.md, right: spacing.md }}
+      >
+        <Ionicons name="close" size={20} color={colors.textPrimary} />
+        <Text style={styles.exitButtonText}>Beenden</Text>
+      </Pressable>
+
       {currentItem && (
         <AlbumPickerModal
           visible={isAlbumPickerOpen}
@@ -1257,23 +1195,23 @@ const styles = StyleSheet.create({
   },
   exitButton: {
     position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
-    zIndex: 10,
+    top: spacing.xl,
+    left: spacing.lg,
+    zIndex: 20,
+    elevation: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
-    elevation: 3,
   },
   exitButtonText: {
     ...typography.button,

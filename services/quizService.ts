@@ -5,8 +5,7 @@
 // zusammensetzen), eine Bilderauswahl (ältestes/neuestes Foto oder das zu
 // einem Ort passende/nicht passende Foto antippen), ein Pärchen-Memory
 // (Fotos mit gemeinsamem Merkmal finden), eine Zuordnung (Fotos und Namen
-// verbinden), eine Karten-Schätzfrage (Aufnahmeort auf der Weltkarte
-// antippen) und ein Jahres-Regler (Jahr per Schieberegler schätzen).
+// verbinden) und eine Karten-Schätzfrage (Aufnahmeort auf der Weltkarte antippen).
 import { LibraryPhoto } from '../types/Photo';
 
 export interface WannQuestion {
@@ -253,26 +252,6 @@ export function buildKarteQuestion(photo: LibraryPhoto): KarteQuestion | null {
     photoUri: photo.uri,
     targetLatitude: photo.coordinates.latitude,
     targetLongitude: photo.coordinates.longitude,
-  };
-}
-
-// Jahres-Regler: das Aufnahmejahr per Schieberegler statt per Multiple-Choice
-// schätzen. Der Regler deckt einen Bereich um das echte Jahr ab.
-export interface WannReglerQuestion {
-  correctYear: number;
-  minYear: number;
-  maxYear: number;
-}
-
-const WANN_REGLER_SPREAD_YEARS = 6;
-
-export function buildWannReglerQuestion(photo: LibraryPhoto): WannReglerQuestion | null {
-  if (!photo.creationTime) return null;
-  const correctYear = new Date(photo.creationTime).getFullYear();
-  return {
-    correctYear,
-    minYear: correctYear - WANN_REGLER_SPREAD_YEARS,
-    maxYear: correctYear + WANN_REGLER_SPREAD_YEARS,
   };
 }
 
