@@ -145,7 +145,10 @@ export function buildPuzzleQuestion(photo: LibraryPhoto, gridSize: number): Puzz
 
 // Eine Frage, bei der eines von mehreren Fotos angetippt werden muss (statt
 // Text-Optionen) - für "ältestes/neuestes Foto" und "Foto aus/nicht aus
-// einem Ort".
+// einem Ort". Die Distraktor-Fotos kommen bewusst aus einem separaten
+// Reservoir statt aus den anderen Fotos derselben Quizrunde (siehe
+// PhotoSwipeScreen) - sonst würde ein Foto, das an anderer Stelle im Quiz
+// noch als eigene Frage drankommt, hier schon vorher gezeigt.
 export interface PhotoChoiceQuestion {
   prompt: string;
   // Foto-URIs in zufälliger Anzeige-Reihenfolge.
@@ -156,13 +159,18 @@ export interface PhotoChoiceQuestion {
 // Wie viele Fotos zur Auswahl stehen.
 const PHOTO_CHOICE_ITEM_COUNT = 4;
 
+interface DateCandidate {
+  uri: string;
+  creationTime: number | null;
+}
+
 // Baut die Frage "Welches Foto ist das älteste/neueste?" aus dem aktuellen
-// Foto und einigen anderen Fotos derselben Quizrunde mit bekanntem
-// Aufnahmedatum. Gibt null zurück, wenn die Runde noch nicht genug andere
-// datierte Fotos enthält.
+// Foto und ein paar weiteren, noch nirgends im Quiz gezeigten Fotos mit
+// bekanntem Aufnahmedatum. Gibt null zurück, wenn noch nicht genug solcher
+// Fotos zur Verfügung stehen.
 export function buildDateExtremeQuestion(
-  currentPhoto: LibraryPhoto,
-  otherPhotos: LibraryPhoto[],
+  currentPhoto: DateCandidate,
+  otherPhotos: DateCandidate[],
   variant: 'oldest' | 'newest'
 ): PhotoChoiceQuestion | null {
   if (!currentPhoto.creationTime) return null;

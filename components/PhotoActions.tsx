@@ -1,5 +1,6 @@
-// Ersetzt nach dem Beantworten die Frage-Überschrift: Löschen oder zu einem
-// Album hinzufügen, bevor per Wisch-Geste zum nächsten Foto gegangen wird.
+// Ersetzt nach dem Beantworten die Frage-Überschrift: Favorisieren, Löschen
+// oder zu einem Album hinzufügen, bevor per Wisch-Geste zum nächsten Foto
+// gegangen wird.
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,14 +9,26 @@ import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme'
 interface PhotoActionsProps {
   onDelete: () => void;
   onAddToAlbum: () => void;
+  onToggleFavorite: () => void;
+  isFavorite: boolean;
   // Name des Albums, falls das Foto schon einem zugeordnet ist – ersetzt
   // dann die Beschriftung "Zu Album".
   albumLabel?: string | null;
 }
 
-export function PhotoActions({ onDelete, onAddToAlbum, albumLabel }: PhotoActionsProps) {
+export function PhotoActions({ onDelete, onAddToAlbum, onToggleFavorite, isFavorite, albumLabel }: PhotoActionsProps) {
   return (
     <View style={styles.row}>
+      <Pressable
+        style={styles.button}
+        onPress={onToggleFavorite}
+        accessibilityRole="button"
+        accessibilityLabel={isFavorite ? 'Aus Favoriten entfernen' : 'Als Favorit markieren'}
+        hitSlop={spacing.sm}
+      >
+        <Ionicons name={isFavorite ? 'heart' : 'heart-outline'} size={22} color={colors.favorite} />
+        <Text style={[styles.buttonLabel, styles.favoriteLabel]}>Favorit</Text>
+      </Pressable>
       <Pressable
         style={styles.button}
         onPress={onDelete}
@@ -45,8 +58,9 @@ export function PhotoActions({ onDelete, onAddToAlbum, albumLabel }: PhotoAction
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: spacing.xl,
+    gap: spacing.md,
   },
   button: {
     minHeight: MIN_TOUCH_TARGET,
@@ -69,5 +83,8 @@ const styles = StyleSheet.create({
   },
   deleteLabel: {
     color: colors.danger,
+  },
+  favoriteLabel: {
+    color: colors.favorite,
   },
 });

@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS Fotos (
   asset_id TEXT,                   -- stabile Asset-ID aus der Mediathek – DAS ist der eindeutige Schlüssel
   timestamp INTEGER NOT NULL,      -- Aufnahmezeitpunkt (Unix-Millisekunden)
   location TEXT,                   -- Ort als Text, optional
-  tags TEXT                        -- Personen/Schlagwörter als JSON-Array-String, optional
+  tags TEXT,                       -- Personen/Schlagwörter als JSON-Array-String, optional
+  favorit INTEGER                  -- 1 = als Favorit markiert, NULL/0 = nicht markiert
 );
 `;
 

@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, PanResponder, Pressable, StyleSheet, Text, Vi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { AlbumPickerModal } from '../components/AlbumPickerModal';
 import { AnswerOptions } from '../components/AnswerOptions';
 import { AudioPlayButton } from '../components/AudioPlayButton';
@@ -43,14 +44,14 @@ import { ImageLabel } from '../modules/image-classifier/src';
 import { DetectedFace } from '../modules/face-recognition/src';
 import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
-import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
+import { upsertPhoto, savePhotoTags, getPhotoTags, getIsFavorite, setFavorite } from '../db/photoRepository';
 import { saveQuizResult } from '../db/quizResultRepository';
 import { Memory, saveMemory, getMemoryForPhoto } from '../db/memoryRepository';
 import { AlbumAssignment, getCurrentAlbumForPhoto, saveAlbumAssignment } from '../db/albumAssignmentRepository';
 import { DEFAULT_PUZZLE_GRID_SIZE, getProfile } from '../db/profileRepository';
 import { LibraryPhoto } from '../types/Photo';
 import { RootStackParamList } from '../types/navigation';
-import { colors, spacing, radius, typography } from '../theme';
+import { colors, spacing, radius, typography, MIN_TOUCH_TARGET } from '../theme';
 
 // Anzahl Fotos pro Quizrunde.
 const QUIZ_LENGTH = 10;
@@ -70,12 +71,24 @@ const CUSTOM_FETCH_POOL_SIZE = 250;
 const CLASSIFICATION_CONCURRENCY = 4;
 // Ab dieser vertikalen Strecke (in Pixeln) zählt eine Wisch-nach-oben-Geste.
 const SWIPE_UP_THRESHOLD = 60;
+// Zusätzliche Fotos, die nie als eigene Quizfrage drankommen, sondern nur
+// als Distraktoren für die "Foto-Auswahl"-Frage bereitstehen (siehe
+// buildDateExtremeQuestion/buildLocationChoiceQuestion) - dadurch taucht
+// über die ganze Runde hinweg kein Foto doppelt auf, weder als Frage noch
+// als Distraktor.
+const RESERVOIR_SIZE = 20;
 
 interface QuizPhoto {
   photo: LibraryPhoto;
   locationName: string | null;
   tags: string[] | null;
   memoryText: string | null;
+}
+
+interface ReservoirPhoto {
+  uri: string;
+  locationName: string | null;
+  creationTime: number | null;
 }
 
 type ChoiceQuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
@@ -146,6 +159,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [quizRunId, setQuizRunId] = useState(0);
   // Raster-Größe fürs Foto-Puzzle, ebenfalls aus den Nutzereinstellungen.
   const [puzzleGridSize, setPuzzleGridSize] = useState(DEFAULT_PUZZLE_GRID_SIZE);
+  // Fotos, die nie selbst Frage-Gegenstand werden, sondern nur als
+  // Distraktoren für "Foto-Auswahl" dienen (siehe RESERVOIR_SIZE oben).
+  const [reservoirPhotos, setReservoirPhotos] = useState<ReservoirPhoto[]>([]);
+  // Merkt sich, welche Reservoir-Fotos in dieser Runde schon als Distraktor
+  // gezeigt wurden, damit auch innerhalb des Reservoirs kein Foto zweimal auftaucht.
+  const usedReservoirUrisRef = useRef<Set<string>>(new Set());
+  const [isCurrentFavorite, setIsCurrentFavorite] = useState(false);
 
   const isMountedRef = useRef(true);
   useEffect(() => {
@@ -191,6 +211,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setErrorMessage(null);
     setDebugFaceInfo(null);
     setQuizRunId((id) => id + 1);
+    setReservoirPhotos([]);
+    usedReservoirUrisRef.current = new Set();
 
     try {
       // Schritt 1: nur eine schnelle, leichte Liste möglicher Fotos holen
@@ -234,17 +256,21 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
       // Schritt 2: Details nachladen (u. a. Ort) und per on-device
       // Bilderkennung Belege/Dokumente aussortieren, bis QUIZ_LENGTH
-      // brauchbare Fotos feststehen oder der Pool erschöpft ist. Mehrere
-      // Fotos werden gleichzeitig klassifiziert (CLASSIFICATION_CONCURRENCY),
-      // da das der langsamste Schritt ist. Sobald das erste brauchbare Foto
-      // feststeht, wird die Runde direkt gezeigt - der Rest lädt im
-      // Hintergrund weiter nach, während schon gespielt werden kann.
+      // brauchbare Fotos feststehen oder der Pool erschöpft ist. Danach wird
+      // weitergesucht, bis zusätzlich RESERVOIR_SIZE weitere, noch nirgends
+      // verwendete Fotos als Distraktor-Reservoir für "Foto-Auswahl"
+      // feststehen (siehe oben) - so taucht kein Foto zweimal in derselben
+      // Runde auf. Mehrere Fotos werden gleichzeitig klassifiziert
+      // (CLASSIFICATION_CONCURRENCY), da das der langsamste Schritt ist.
+      // Sobald das erste brauchbare Foto feststeht, wird die Runde direkt
+      // gezeigt - der Rest lädt im Hintergrund weiter nach.
       const quizPhotos: QuizPhoto[] = [];
+      const reservoir: ReservoirPhoto[] = [];
       let hasCheckedCuriosity = false;
       let hasRevealedQuiz = false;
 
       for (let i = 0; i < shuffled.length; i += CLASSIFICATION_CONCURRENCY) {
-        if (quizPhotos.length >= QUIZ_LENGTH) break;
+        if (quizPhotos.length >= QUIZ_LENGTH && reservoir.length >= RESERVOIR_SIZE) break;
         if (!isMountedRef.current) return;
 
         const chunk = shuffled.slice(i, i + CLASSIFICATION_CONCURRENCY);
@@ -282,7 +308,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         if (!isMountedRef.current) return;
 
         for (const item of resolved) {
-          if (quizPhotos.length >= QUIZ_LENGTH) break;
+          if (quizPhotos.length >= QUIZ_LENGTH && reservoir.length >= RESERVOIR_SIZE) break;
 
           const { photo, fotoId, labels, matchedByMetadata } = item;
           let { locationName, tags } = item;
@@ -300,41 +326,49 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             if (!isMountedRef.current) return;
           }
 
-          const memory = await getMemoryForPhoto(fotoId);
-          if (!isMountedRef.current) return;
-
-          // Erst ab dem zweiten angenommenen Foto prüfen, damit das
-          // Lade-Abfragefoto nie dasselbe Foto ist wie das erste Bild im
-          // Quiz (quizPhotos[0]).
-          if (!hasCheckedCuriosity && quizPhotos.length >= 1) {
-            hasCheckedCuriosity = true;
-            const question = await pickCuriosityQuestion(fotoId, photo.uri);
+          // Runde noch nicht voll: dieses Foto wird eine eigene Quizfrage.
+          if (quizPhotos.length < QUIZ_LENGTH) {
+            const memory = await getMemoryForPhoto(fotoId);
             if (!isMountedRef.current) return;
-            if (question) {
-              activateCuriosityQuestion(fotoId, photo.uri, question, true);
+
+            // Erst ab dem zweiten angenommenen Foto prüfen, damit das
+            // Lade-Abfragefoto nie dasselbe Foto ist wie das erste Bild im
+            // Quiz (quizPhotos[0]).
+            if (!hasCheckedCuriosity && quizPhotos.length >= 1) {
+              hasCheckedCuriosity = true;
+              const question = await pickCuriosityQuestion(fotoId, photo.uri);
+              if (!isMountedRef.current) return;
+              if (question) {
+                activateCuriosityQuestion(fotoId, photo.uri, question, true);
+              }
             }
-          }
 
-          quizPhotos.push({
-            photo,
-            locationName,
-            tags,
-            memoryText: memory?.text ?? null,
-          });
+            quizPhotos.push({
+              photo,
+              locationName,
+              tags,
+              memoryText: memory?.text ?? null,
+            });
 
-          if (!hasRevealedQuiz) {
-            hasRevealedQuiz = true;
-            setCurrentIndex(0);
-            setSelectedOption(null);
-            setIsRevealed(false);
-            setRevealedMemory(null);
-            setScore({ correct: 0, total: 0 });
+            if (!hasRevealedQuiz) {
+              hasRevealedQuiz = true;
+              setCurrentIndex(0);
+              setSelectedOption(null);
+              setIsRevealed(false);
+              setRevealedMemory(null);
+              setScore({ correct: 0, total: 0 });
+            }
+            setPhotos([...quizPhotos]);
+          } else if (reservoir.length < RESERVOIR_SIZE) {
+            // Runde schon voll: dieses Foto wird nie selbst gefragt, dient
+            // nur noch als frischer Distraktor für "Foto-Auswahl".
+            reservoir.push({ uri: photo.uri, locationName, creationTime: photo.creationTime });
           }
-          setPhotos([...quizPhotos]);
         }
       }
 
       if (!isMountedRef.current) return;
+      setReservoirPhotos(reservoir);
       setIsSearchComplete(true);
       if (quizPhotos.length === 0) {
         setPhotos([]);
@@ -384,54 +418,48 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
       },
       () => {
-        const dateChoice = buildDateExtremeQuestion(
-          currentItem.photo,
-          others.map((item) => item.photo),
-          'oldest'
-        );
-        return dateChoice
-          ? { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri }
-          : null;
+        // Distraktoren kommen aus dem Reservoir statt aus den anderen Fotos
+        // dieser Runde, damit über die ganze Runde hinweg kein Foto doppelt
+        // gezeigt wird (siehe RESERVOIR_SIZE oben) - schon genutzte
+        // Reservoir-Fotos scheiden dafür aus.
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const dateChoice = buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'oldest');
+        if (!dateChoice) return null;
+        dateChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+        return { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri };
       },
       () => {
-        const dateChoice = buildDateExtremeQuestion(
-          currentItem.photo,
-          others.map((item) => item.photo),
-          'newest'
-        );
-        return dateChoice
-          ? { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri }
-          : null;
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const dateChoice = buildDateExtremeQuestion(currentItem.photo, availableReservoir, 'newest');
+        if (!dateChoice) return null;
+        dateChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+        return { type: 'FOTO_AUSWAHL', prompt: dateChoice.prompt, options: dateChoice.options, correctOption: dateChoice.correctUri };
       },
       () => {
-        const candidates = [currentItem, ...others].map((item) => ({
-          uri: item.photo.uri,
-          locationName: item.locationName,
-        }));
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
         const locationChoice = buildLocationChoiceQuestion(candidates, 'match');
-        return locationChoice
-          ? {
-              type: 'FOTO_AUSWAHL',
-              prompt: locationChoice.prompt,
-              options: locationChoice.options,
-              correctOption: locationChoice.correctUri,
-            }
-          : null;
+        if (!locationChoice) return null;
+        locationChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+        return {
+          type: 'FOTO_AUSWAHL',
+          prompt: locationChoice.prompt,
+          options: locationChoice.options,
+          correctOption: locationChoice.correctUri,
+        };
       },
       () => {
-        const candidates = [currentItem, ...others].map((item) => ({
-          uri: item.photo.uri,
-          locationName: item.locationName,
-        }));
+        const availableReservoir = reservoirPhotos.filter((item) => !usedReservoirUrisRef.current.has(item.uri));
+        const candidates = [{ uri: currentItem.photo.uri, locationName: currentItem.locationName }, ...availableReservoir];
         const locationChoice = buildLocationChoiceQuestion(candidates, 'mismatch');
-        return locationChoice
-          ? {
-              type: 'FOTO_AUSWAHL',
-              prompt: locationChoice.prompt,
-              options: locationChoice.options,
-              correctOption: locationChoice.correctUri,
-            }
-          : null;
+        if (!locationChoice) return null;
+        locationChoice.options.forEach((uri) => usedReservoirUrisRef.current.add(uri));
+        return {
+          type: 'FOTO_AUSWAHL',
+          prompt: locationChoice.prompt,
+          options: locationChoice.options,
+          correctOption: locationChoice.correctUri,
+        };
       },
     ];
 
@@ -445,7 +473,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
       return { type: 'WANN', options: wann.options.map(String), correctOption: String(wann.correctYear) };
     }
     return null;
-  }, [currentItem, photos, currentIndex, puzzleGridSize]);
+  }, [currentItem, photos, currentIndex, puzzleGridSize, reservoirPhotos]);
 
   // Ob gerade tatsächlich eine unbeantwortete Frage sichtbar ist - der Timer
   // (siehe unten) läuft nur währenddessen, nicht beim Laden, während einer
@@ -484,10 +512,12 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // bekannt ist, zusätzlich ein echter Abgleich mit allen Alben der
   // Mediathek (deckt auch Zuordnungen ab, die nicht über Memo-Me gemacht
   // wurden). Ein gefundenes Ergebnis wird im Cache abgelegt, damit der
-  // langsame Abgleich pro Foto nur einmal nötig ist.
+  // langsame Abgleich pro Foto nur einmal nötig ist. Lädt im selben Zug den
+  // Favoriten-Status, da beides an denselben Fotowechsel gekoppelt ist.
   useEffect(() => {
     if (!currentItem) {
       setCurrentAlbum(null);
+      setIsCurrentFavorite(false);
       return;
     }
     let isActive = true;
@@ -507,8 +537,11 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
         }
 
         if (isActive) setCurrentAlbum(assignment);
+
+        const isFavorite = await getIsFavorite(fotoId);
+        if (isActive) setIsCurrentFavorite(isFavorite);
       } catch (error) {
-        console.error('Album-Zuordnung konnte nicht geladen werden:', error);
+        console.error('Album-Zuordnung/Favorit konnte nicht geladen werden:', error);
       }
     })();
 
@@ -705,6 +738,20 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setIsAlbumPickerOpen(true);
   }
 
+  async function handleToggleFavorite() {
+    if (!currentItem) return;
+    const next = !isCurrentFavorite;
+    setIsCurrentFavorite(next);
+    try {
+      const fotoId = await upsertPhoto(currentItem.photo);
+      await setFavorite(fotoId, next);
+    } catch (error) {
+      console.error('Favorit konnte nicht gespeichert werden:', error);
+      if (isMountedRef.current) setIsCurrentFavorite(!next);
+    }
+  }
+
+
   async function handleAlbumAssigned(albumId: string, albumTitle: string) {
     setIsAlbumPickerOpen(false);
     if (!currentItem) return;
@@ -778,6 +825,9 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     loadQuiz();
   }
 
+  // Auch für den "Quiz beenden"-Button oben im Screen genutzt - Ergebnisse
+  // werden schon pro Frage gespeichert (siehe finalizeAnswer), beim
+  // Verlassen geht also nichts verloren.
   function startDifferentQuiz() {
     navigation.replace('PhotoSource');
   }
@@ -817,6 +867,15 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <Pressable
+        style={styles.exitButton}
+        onPress={startDifferentQuiz}
+        accessibilityRole="button"
+        accessibilityLabel="Quiz beenden"
+        hitSlop={spacing.sm}
+      >
+        <Ionicons name="close" size={26} color={colors.textPrimary} />
+      </Pressable>
       <View style={styles.content} {...panResponder.panHandlers}>
         {isLoading && (
           <>
@@ -903,6 +962,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                   <PhotoActions
                     onDelete={handleDeletePhoto}
                     onAddToAlbum={handleOpenAlbumPicker}
+                    onToggleFavorite={handleToggleFavorite}
+                    isFavorite={isCurrentFavorite}
                     albumLabel={currentAlbum?.albumTitle}
                   />
                 )}
@@ -926,6 +987,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                   <PhotoActions
                     onDelete={handleDeletePhoto}
                     onAddToAlbum={handleOpenAlbumPicker}
+                    onToggleFavorite={handleToggleFavorite}
+                    isFavorite={isCurrentFavorite}
                     albumLabel={currentAlbum?.albumTitle}
                   />
                 ) : (
@@ -988,6 +1051,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.surface,
+  },
+  exitButton: {
+    position: 'absolute',
+    top: spacing.md,
+    left: spacing.md,
+    zIndex: 10,
+    width: MIN_TOUCH_TARGET,
+    height: MIN_TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,

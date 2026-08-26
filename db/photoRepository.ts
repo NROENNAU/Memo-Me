@@ -62,3 +62,16 @@ export async function savePhotoTags(fotoId: number, tags: string[]): Promise<voi
   const db = getDatabase();
   await db.runAsync('UPDATE Fotos SET tags = ? WHERE id = ?', JSON.stringify(tags), fotoId);
 }
+
+// Liest, ob ein Foto als Favorit markiert ist.
+export async function getIsFavorite(fotoId: number): Promise<boolean> {
+  const db = getDatabase();
+  const row = await db.getFirstAsync<{ favorit: number | null }>('SELECT favorit FROM Fotos WHERE id = ?', fotoId);
+  return row?.favorit === 1;
+}
+
+// Markiert ein Foto als Favorit oder entfernt die Markierung.
+export async function setFavorite(fotoId: number, isFavorite: boolean): Promise<void> {
+  const db = getDatabase();
+  await db.runAsync('UPDATE Fotos SET favorit = ? WHERE id = ?', isFavorite ? 1 : 0, fotoId);
+}
