@@ -303,7 +303,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           const memory = await getMemoryForPhoto(fotoId);
           if (!isMountedRef.current) return;
 
-          if (!hasCheckedCuriosity) {
+          // Erst ab dem zweiten angenommenen Foto prüfen, damit das
+          // Lade-Abfragefoto nie dasselbe Foto ist wie das erste Bild im
+          // Quiz (quizPhotos[0]).
+          if (!hasCheckedCuriosity && quizPhotos.length >= 1) {
             hasCheckedCuriosity = true;
             const question = await pickCuriosityQuestion(fotoId, photo.uri);
             if (!isMountedRef.current) return;

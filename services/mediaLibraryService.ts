@@ -71,6 +71,21 @@ function toCandidatePhoto(asset: MediaLibrary.Asset): CandidatePhoto {
   };
 }
 
+// Entfernt doppelte Fotos anhand ihrer Asset-ID - kann vorkommen, wenn
+// mehrere Fotos exakt denselben Aufnahmezeitpunkt haben und dadurch auf
+// eine Bucket-Grenze fallen (siehe listCandidatePhotos unten). Ohne diesen
+// Schritt könnte dasselbe Foto mehrfach in derselben Quizrunde auftauchen.
+function dedupeByAssetId(candidates: CandidatePhoto[]): CandidatePhoto[] {
+  const seen = new Set<string>();
+  const result: CandidatePhoto[] = [];
+  for (const candidate of candidates) {
+    if (seen.has(candidate.assetId)) continue;
+    seen.add(candidate.assetId);
+    result.push(candidate);
+  }
+  return result;
+}
+
 // In wie viele Zeitabschnitte der verfügbare Zeitraum einer Quelle beim
 // Aufbau des Fotopools unterteilt wird - verhindert, dass eine Quizrunde nur
 // aus den neuesten Fotos besteht, statt über die ganze Quelle durchmischt zu sein.
@@ -105,7 +120,7 @@ export async function listCandidatePhotos(source: PhotoSource, limit: number): P
   // selben Zeitpunkt) - Aufteilung in Zeitabschnitte bringt hier nichts.
   if (!oldestTime || !newestTime || oldestTime >= newestTime) {
     const { assets } = await MediaLibrary.getAssetsAsync(optionsForSource(source, limit));
-    return assets.map(toCandidatePhoto);
+    return dedupeByAssetId(assets.map(toCandidatePhoto));
   }
 
   const perBucket = Math.max(1, Math.ceil(limit / TIME_BUCKETS));
@@ -125,7 +140,8 @@ export async function listCandidatePhotos(source: PhotoSource, limit: number): P
     })
   );
 
-  return buckets.flatMap(({ assets }) => shuffle(assets).slice(0, perBucket).map(toCandidatePhoto));
+  const candidates = buckets.flatMap(({ assets }) => shuffle(assets).slice(0, perBucket).map(toCandidatePhoto));
+  return dedupeByAssetId(candidates);
 }
 
 // Liefert das neueste Foto einer Quelle als Vorschaubild (z. B. für die
