@@ -14,6 +14,8 @@ import { AnswerOptions } from '../components/AnswerOptions';
 import { AudioPlayButton } from '../components/AudioPlayButton';
 import { CuriosityPrompt } from '../components/CuriosityPrompt';
 import { PhotoActions } from '../components/PhotoActions';
+import { PuzzleGame } from '../components/PuzzleGame';
+import { TimelineGame } from '../components/TimelineGame';
 import { ScoreRing } from '../components/ScoreRing';
 import {
   addPhotosToAlbum,
@@ -26,10 +28,13 @@ import {
 import { reverseGeocode } from '../services/locationService';
 import {
   buildErinnerungQuestion,
+  buildPuzzleQuestion,
+  buildTimelineQuestion,
   buildWannQuestion,
   buildWerQuestion,
   buildWoQuestion,
   shuffle,
+  TimelineItem,
 } from '../services/quizService';
 import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
@@ -72,13 +77,27 @@ interface QuizPhoto {
   memoryText: string | null;
 }
 
-type QuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
+type ChoiceQuestionKind = 'WANN' | 'WO' | 'WER' | 'ERINNERUNG';
+type QuestionKind = ChoiceQuestionKind | 'PUZZLE' | 'TIMELINE';
 
-interface Question {
-  type: QuestionKind;
+interface ChoiceQuestion {
+  type: ChoiceQuestionKind;
   options: string[];
   correctOption: string;
 }
+
+interface PuzzleQuestionView {
+  type: 'PUZZLE';
+  photoUri: string;
+  gridSize: number;
+}
+
+interface TimelineQuestionView {
+  type: 'TIMELINE';
+  items: TimelineItem[];
+}
+
+type Question = ChoiceQuestion | PuzzleQuestionView | TimelineQuestionView;
 
 type Props = NativeStackScreenProps<RootStackParamList, 'PhotoSwipe'>;
 
@@ -331,6 +350,17 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
           ? { type: 'ERINNERUNG', options: erinnerung.options, correctOption: erinnerung.correctText }
           : null;
       },
+      () => {
+        const puzzle = buildPuzzleQuestion(currentItem.photo);
+        return { type: 'PUZZLE', photoUri: puzzle.photoUri, gridSize: puzzle.gridSize };
+      },
+      () => {
+        const timeline = buildTimelineQuestion(
+          currentItem.photo,
+          others.map((item) => item.photo)
+        );
+        return timeline ? { type: 'TIMELINE', items: timeline.items } : null;
+      },
     ];
 
     for (const build of shuffle(builders)) {
@@ -497,13 +527,11 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     finishCuriosity();
   }
 
-  // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
-  // zusätzlicher Bestätigen-Schritt mehr.
-  async function handleSelectAnswer(option: string) {
-    if (!currentItem || !question || isRevealed) return;
-
-    setSelectedOption(option);
-    const isCorrect = option === question.correctOption;
+  // Gemeinsame Logik nach jeder Antwort, egal welcher Fragetyp: Ergebnis
+  // merken, in der Datenbank speichern und eine evtl. hinterlegte Erinnerung
+  // zum Foto nachladen (wird bei Multiple-Choice-Fragen als Extra gezeigt).
+  async function finalizeAnswer(questionType: QuestionKind, isCorrect: boolean) {
+    if (!currentItem) return;
     setIsRevealed(true);
     setScore((previous) => ({
       correct: previous.correct + (isCorrect ? 1 : 0),
@@ -512,14 +540,36 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
     try {
       const fotoId = await upsertPhoto(currentItem.photo);
-      await saveQuizResult(fotoId, question.type, isCorrect);
-      // Falls zu diesem Foto schon eine eigene Geschichte hinterlegt ist,
-      // zeigen wir sie jetzt als kleines Extra zur Antwort.
+      await saveQuizResult(fotoId, questionType, isCorrect);
       const memory = await getMemoryForPhoto(fotoId);
       if (isMountedRef.current) setRevealedMemory(memory);
     } catch (error) {
       console.error('Quizergebnis konnte nicht gespeichert werden:', error);
     }
+  }
+
+  // Beim Antippen einer Option löst sich die Antwort sofort auf – kein
+  // zusätzlicher Bestätigen-Schritt mehr.
+  async function handleSelectAnswer(option: string) {
+    if (!currentItem || !question || isRevealed) return;
+    if (question.type === 'PUZZLE' || question.type === 'TIMELINE') return;
+
+    setSelectedOption(option);
+    await finalizeAnswer(question.type, option === question.correctOption);
+  }
+
+  // Das Puzzle hat keine falsche Lösung - sobald es gelöst ist, zählt es als
+  // richtig beantwortet.
+  function handlePuzzleSolved() {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('PUZZLE', true);
+  }
+
+  // Die Zeitleiste wertet sich selbst aus (siehe TimelineGame) und meldet
+  // hier nur noch, ob die komplette Reihenfolge stimmte.
+  function handleTimelineSubmit(isCorrect: boolean) {
+    if (!currentItem || isRevealed) return;
+    finalizeAnswer('TIMELINE', isCorrect);
   }
 
   function handleDeletePhoto() {
@@ -638,6 +688,8 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     WO: 'Wo wurde dieses Foto aufgenommen?',
     WER: 'Wer ist auf diesem Foto zu sehen?',
     ERINNERUNG: 'Welche Erinnerung passt zu diesem Foto?',
+    PUZZLE: 'Setze das Foto wieder zusammen!',
+    TIMELINE: 'Bring die Fotos in die richtige Reihenfolge!',
   };
   const headingText = question ? headingByType[question.type] : '';
   // Bei "Wer ist das?" mit mehreren Personen: statt des ganzen Fotos wird
@@ -727,49 +779,77 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
 
         {!isLoading && !errorMessage && !curiosityQuestion && !isFinished && currentItem && question && (
           <>
-            {isRevealed ? (
-              <PhotoActions
-                onDelete={handleDeletePhoto}
-                onAddToAlbum={handleOpenAlbumPicker}
-                albumLabel={currentAlbum?.albumTitle}
-              />
+            {question.type === 'PUZZLE' ? (
+              <>
+                <Text style={styles.heading}>{headingText}</Text>
+                <PuzzleGame
+                  key={currentItem.photo.uri}
+                  photoUri={question.photoUri}
+                  gridSize={question.gridSize}
+                  onSolved={handlePuzzleSolved}
+                />
+                {isRevealed && (
+                  <PhotoActions
+                    onDelete={handleDeletePhoto}
+                    onAddToAlbum={handleOpenAlbumPicker}
+                    albumLabel={currentAlbum?.albumTitle}
+                  />
+                )}
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
+            ) : question.type === 'TIMELINE' ? (
+              <>
+                <Text style={styles.heading}>{headingText}</Text>
+                <TimelineGame key={currentItem.photo.uri} items={question.items} onSubmit={handleTimelineSubmit} />
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
             ) : (
-              <Text style={styles.heading}>{headingText}</Text>
+              <>
+                {isRevealed ? (
+                  <PhotoActions
+                    onDelete={handleDeletePhoto}
+                    onAddToAlbum={handleOpenAlbumPicker}
+                    albumLabel={currentAlbum?.albumTitle}
+                  />
+                ) : (
+                  <Text style={styles.heading}>{headingText}</Text>
+                )}
+                <View style={styles.photoWrapper}>
+                  <Image
+                    source={{ uri: currentItem.photo.uri }}
+                    style={styles.photo}
+                    contentFit="cover"
+                    accessibilityLabel="Ein Foto aus deiner Mediathek"
+                  />
+                  {currentAlbum && (
+                    <Pressable
+                      style={styles.albumBadge}
+                      onPress={handleOpenAlbumPicker}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Album: ${currentAlbum.albumTitle}, zum Umsortieren antippen`}
+                    >
+                      <Text style={styles.albumBadgeText} numberOfLines={1}>
+                        {currentAlbum.albumTitle}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+                <AnswerOptions
+                  options={question.options}
+                  selectedOption={selectedOption}
+                  correctOption={question.correctOption}
+                  isRevealed={isRevealed}
+                  onSelect={handleSelectAnswer}
+                />
+                {isRevealed && question.type !== 'ERINNERUNG' && revealedMemory && (
+                  <View style={styles.memoryBox}>
+                    {revealedMemory.text && <Text style={styles.memoryText}>📝 {revealedMemory.text}</Text>}
+                    {revealedMemory.audioUri && <AudioPlayButton uri={revealedMemory.audioUri} />}
+                  </View>
+                )}
+                {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
+              </>
             )}
-            <View style={styles.photoWrapper}>
-              <Image
-                source={{ uri: currentItem.photo.uri }}
-                style={styles.photo}
-                contentFit="cover"
-                accessibilityLabel="Ein Foto aus deiner Mediathek"
-              />
-              {currentAlbum && (
-                <Pressable
-                  style={styles.albumBadge}
-                  onPress={handleOpenAlbumPicker}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Album: ${currentAlbum.albumTitle}, zum Umsortieren antippen`}
-                >
-                  <Text style={styles.albumBadgeText} numberOfLines={1}>
-                    {currentAlbum.albumTitle}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-            <AnswerOptions
-              options={question.options}
-              selectedOption={selectedOption}
-              correctOption={question.correctOption}
-              isRevealed={isRevealed}
-              onSelect={handleSelectAnswer}
-            />
-            {isRevealed && question.type !== 'ERINNERUNG' && revealedMemory && (
-              <View style={styles.memoryBox}>
-                {revealedMemory.text && <Text style={styles.memoryText}>📝 {revealedMemory.text}</Text>}
-                {revealedMemory.audioUri && <AudioPlayButton uri={revealedMemory.audioUri} />}
-              </View>
-            )}
-            {isRevealed && <Text style={styles.hintText}>Nach oben wischen für das nächste Foto</Text>}
           </>
         )}
       </View>

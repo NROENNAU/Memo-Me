@@ -1,7 +1,9 @@
 // Erzeugt Quizfragen aus einem Foto: "Wann" (Aufnahmejahr), "Wo" (Ortsname),
 // "Wer" (hinterlegte Personen-Tags) und "Erinnerung" (welche selbst erzählte
 // Geschichte zu diesem Foto gehört) - jeweils mit drei plausiblen, aber
-// falschen Optionen.
+// falschen Optionen. Dazu zwei spielerische Formen ohne Multiple-Choice:
+// "Puzzle" (Foto in Teile zerlegt wieder zusammensetzen) und "Zeitleiste"
+// (mehrere Fotos in die richtige chronologische Reihenfolge bringen).
 import { LibraryPhoto } from '../types/Photo';
 
 export interface WannQuestion {
@@ -127,4 +129,58 @@ export function buildErinnerungQuestion(correctText: string | null, otherTexts: 
 
   const wrongTexts = shuffle(distractorPool).slice(0, 3);
   return { correctText: correctPreview, options: shuffle([correctPreview, ...wrongTexts]) };
+}
+
+// Anzahl Zeilen/Spalten für das Foto-Puzzle - 3x3 ist auf einem Handy-Screen
+// noch gut antippbar und trotzdem eine echte Herausforderung.
+const PUZZLE_GRID_SIZE = 3;
+
+export interface PuzzleQuestion {
+  photoUri: string;
+  gridSize: number;
+}
+
+// Das Puzzle braucht nur ein Foto - geht also praktisch immer.
+export function buildPuzzleQuestion(photo: LibraryPhoto): PuzzleQuestion {
+  return { photoUri: photo.uri, gridSize: PUZZLE_GRID_SIZE };
+}
+
+// Wie viele Fotos zusammen in die Zeitleiste kommen.
+const TIMELINE_ITEM_COUNT = 4;
+
+export interface TimelineItem {
+  uri: string;
+  timestamp: number;
+  year: number;
+}
+
+export interface TimelineQuestion {
+  // In zufälliger Anzeige-Reihenfolge - die eigentliche chronologische
+  // Reihenfolge ergibt sich erst aus den timestamp-Werten.
+  items: TimelineItem[];
+}
+
+// Baut eine Zeitleisten-Frage aus dem aktuellen Foto und einigen anderen
+// Fotos derselben Quizrunde mit bekanntem Aufnahmedatum. Gibt null zurück,
+// wenn die Runde noch nicht genug andere datierte Fotos für eine sinnvolle
+// Reihenfolge enthält.
+export function buildTimelineQuestion(
+  currentPhoto: LibraryPhoto,
+  otherPhotos: LibraryPhoto[]
+): TimelineQuestion | null {
+  if (!currentPhoto.creationTime) return null;
+
+  const validOthers = otherPhotos.filter(
+    (photo) => photo.creationTime !== null && photo.uri !== currentPhoto.uri
+  );
+  if (validOthers.length < TIMELINE_ITEM_COUNT - 1) return null;
+
+  const chosenOthers = shuffle(validOthers).slice(0, TIMELINE_ITEM_COUNT - 1);
+  const items = [currentPhoto, ...chosenOthers].map((photo) => ({
+    uri: photo.uri,
+    timestamp: photo.creationTime as number,
+    year: new Date(photo.creationTime as number).getFullYear(),
+  }));
+
+  return { items: shuffle(items) };
 }
