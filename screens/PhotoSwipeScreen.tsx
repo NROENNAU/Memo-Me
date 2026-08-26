@@ -41,6 +41,7 @@ import {
   buildWerQuestion,
   buildWoQuestion,
   buildZuordnungQuestion,
+  calculateAnswerPoints,
   MatchPair,
   MemoryCard,
   PhotoChoiceQuestion,
@@ -179,7 +180,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [isRevealed, setIsRevealed] = useState(false);
-  const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [score, setScore] = useState({ correct: 0, total: 0, points: 0 });
   const [curiosityQuestion, setCuriosityQuestion] = useState<CuriosityQuestion | null>(null);
   const [curiosityFotoId, setCuriosityFotoId] = useState<number | null>(null);
   const [curiosityPhotoUri, setCuriosityPhotoUri] = useState<string | null>(null);
@@ -205,6 +206,10 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   // noch nicht geladen; 0 = in den Einstellungen abgeschaltet.
   const [timerDuration, setTimerDuration] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  // Zeitpunkt, seit dem die aktuelle Frage sichtbar ist - Grundlage für den
+  // Tempo-Bonus der Punkteberechnung (siehe finalizeAnswer), unabhängig
+  // davon, ob der sichtbare Countdown-Timer in den Einstellungen aktiv ist.
+  const questionStartedAtRef = useRef<number>(Date.now());
   // Erhöht sich bei jedem (Neu-)Start einer Runde, damit der Timer auch dann
   // zurückgesetzt wird, wenn currentIndex zufällig schon 0 war.
   const [quizRunId, setQuizRunId] = useState(0);
@@ -437,7 +442,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
               setSelectedOption(null);
               setIsRevealed(false);
               setRevealedMemory(null);
-              setScore({ correct: 0, total: 0 });
+              setScore({ correct: 0, total: 0, points: 0 });
             }
             setPhotos([...quizPhotos]);
           } else if (reservoir.length < RESERVOIR_SIZE) {
@@ -637,6 +642,13 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     setTimeLeft(timerDuration > 0 ? timerDuration : null);
   }, [currentIndex, quizRunId, timerDuration]);
 
+  // Setzt die Startzeit für den Tempo-Bonus zurück, sobald ein neues Foto
+  // drankommt - unabhängig vom Timer oben, damit Tempo auch bei
+  // ausgeschaltetem Countdown gemessen wird.
+  useEffect(() => {
+    questionStartedAtRef.current = Date.now();
+  }, [currentIndex, quizRunId]);
+
   // Zählt jede Sekunde herunter, aber nur während die Frage aktiv ist -
   // dadurch pausiert der Timer automatisch beim Laden oder nach dem Antworten.
   useEffect(() => {
@@ -812,20 +824,28 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
     finishCuriosity();
   }
 
-  // Gemeinsame Logik nach jeder Antwort, egal welcher Fragetyp: Ergebnis
+  // Gemeinsame Logik nach jeder Antwort, egal welcher Fragetyp: Punkte
+  // berechnen (richtig beantwortet + Tempo + bei Mehrfachversuch-Spielen die
+  // Anzahl überflüssiger Versuche, siehe calculateAnswerPoints), Ergebnis
   // merken, in der Datenbank speichern und eine evtl. hinterlegte Erinnerung
   // zum Foto nachladen (wird bei Multiple-Choice-Fragen als Extra gezeigt).
-  async function finalizeAnswer(questionType: QuestionKind, isCorrect: boolean) {
+  // extraAttempts gilt nur für Puzzle/Pärchen/Zuordnung - bei Einfachauswahl-
+  // Fragen (Wann/Wo/Wer/Erinnerung/Foto-Auswahl/Karte) bleibt es beim
+  // Standardwert 0, da dort jeder Tipp final ist.
+  async function finalizeAnswer(questionType: QuestionKind, isCorrect: boolean, extraAttempts: number = 0) {
     if (!currentItem) return;
     setIsRevealed(true);
+    const elapsedMs = Date.now() - questionStartedAtRef.current;
+    const points = calculateAnswerPoints({ isCorrect, elapsedMs, extraAttempts });
     setScore((previous) => ({
       correct: previous.correct + (isCorrect ? 1 : 0),
       total: previous.total + 1,
+      points: previous.points + points,
     }));
 
     try {
       const fotoId = await upsertPhoto(currentItem.photo);
-      await saveQuizResult(fotoId, questionType, isCorrect);
+      await saveQuizResult(fotoId, questionType, isCorrect, points);
       const memory = await getMemoryForPhoto(fotoId);
       if (isMountedRef.current) setRevealedMemory(memory);
     } catch (error) {
@@ -854,24 +874,30 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
   }
 
   // Das Puzzle hat keine falsche Lösung - sobald es gelöst ist, zählt es als
-  // richtig beantwortet.
-  function handlePuzzleSolved() {
+  // richtig beantwortet. moveCount fließt als Versuche-Maß in die Punkte ein
+  // (gridSize wird von der aufrufenden Stelle mitgegeben, nicht erneut aus
+  // question gelesen, da sich die Frage zwischen Anzeige und Lösen -
+  // theoretisch, siehe reservoirPhotos - schon geändert haben könnte).
+  function handlePuzzleSolved(moveCount: number, gridSize: number) {
     if (!currentItem || isRevealed) return;
-    finalizeAnswer('PUZZLE', true);
+    const idealMoves = Math.max(1, gridSize * gridSize - 1);
+    finalizeAnswer('PUZZLE', true, Math.max(0, moveCount - idealMoves));
   }
 
   // Das Pärchen-Memory wertet sich selbst aus (siehe MemoryGame) und meldet
-  // hier nur noch, ob alle Paare gefunden wurden.
-  function handleMemoryComplete(isCorrect: boolean) {
+  // hier nur noch, ob alle Paare gefunden wurden und wie viele Fehlversuche
+  // (nicht zusammenpassende Paare) dafür nötig waren.
+  function handleMemoryComplete(isCorrect: boolean, mismatchCount: number) {
     if (!currentItem || isRevealed) return;
-    finalizeAnswer('PAARCHEN', isCorrect);
+    finalizeAnswer('PAARCHEN', isCorrect, mismatchCount);
   }
 
   // Die Zuordnung wertet sich selbst aus (siehe MatchGame) und meldet hier
-  // nur noch, ob alle Fotos dem richtigen Namen zugeordnet wurden.
-  function handleMatchComplete(isCorrect: boolean) {
+  // nur noch, ob alle Fotos dem richtigen Namen zugeordnet wurden und wie
+  // viele Fehltipps dafür korrigiert werden mussten.
+  function handleMatchComplete(isCorrect: boolean, correctionCount: number) {
     if (!currentItem || isRevealed) return;
-    finalizeAnswer('ZUORDNUNG', isCorrect);
+    finalizeAnswer('ZUORDNUNG', isCorrect, correctionCount);
   }
 
   // Die Karten-Schätzfrage wertet sich selbst aus (siehe MapGuessGame) und
@@ -1103,6 +1129,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             <Text style={styles.heading}>Großartig!</Text>
             <Text style={styles.statusText}>Du hast das Quiz abgeschlossen.</Text>
             <ScoreRing correct={score.correct} total={score.total} />
+            <Text style={styles.pointsText}>🏆 {score.points} Punkte</Text>
             <Pressable
               style={styles.restartButton}
               onPress={restartQuiz}
@@ -1134,7 +1161,7 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
                   key={currentItem.photo.uri}
                   photoUri={question.photoUri}
                   gridSize={question.gridSize}
-                  onSolved={handlePuzzleSolved}
+                  onSolved={(moveCount) => handlePuzzleSolved(moveCount, question.gridSize)}
                   disabled={isRevealed}
                 />
                 {isRevealed && (
@@ -1317,6 +1344,11 @@ const styles = StyleSheet.create({
   heading: {
     ...typography.heading,
     color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  pointsText: {
+    ...typography.title,
+    color: colors.primary,
     textAlign: 'center',
   },
   timerText: {

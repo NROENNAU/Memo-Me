@@ -47,6 +47,7 @@ export async function initDatabase(): Promise<void> {
   await ensureColumn(database, 'Fotos', 'asset_id', 'TEXT');
   await ensureColumn(database, 'Fotos', 'favorit', 'INTEGER');
   await database.execAsync(CREATE_QUIZ_ERGEBNISSE_TABLE);
+  await ensureColumn(database, 'QuizErgebnisse', 'punkte', 'INTEGER');
   await database.execAsync(CREATE_ERINNERUNGEN_TABLE);
   await ensureColumn(database, 'Erinnerungen', 'audio_uri', 'TEXT');
   await database.execAsync(CREATE_FOTO_ALBEN_TABLE);

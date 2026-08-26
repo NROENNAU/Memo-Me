@@ -20,6 +20,8 @@ export interface QuizResult {
   fotoId: number;
   questionType: QuestionType;
   correct: boolean;
+  // Erzielte Punkte, siehe calculateAnswerPoints in services/quizService.ts
+  points: number;
   // Zeitpunkt der Beantwortung als Unix-Timestamp (Millisekunden)
   date: number;
 }

@@ -11,7 +11,9 @@ import { colors, radius, spacing, typography } from '../theme';
 
 interface MemoryGameProps {
   cards: MemoryCard[];
-  onComplete: (isCorrect: boolean) => void;
+  // mismatchCount = Anzahl der nicht zusammenpassenden Kartenpaare, Grundlage
+  // für den Versuche-Bonus der Punkteberechnung (siehe PhotoSwipeScreen).
+  onComplete: (isCorrect: boolean, mismatchCount: number) => void;
   disabled?: boolean;
 }
 
@@ -23,6 +25,7 @@ export function MemoryGame({ cards, onComplete, disabled = false }: MemoryGamePr
   const [flippedIndices, setFlippedIndices] = useState<number[]>([]);
   const [matchedGroupKeys, setMatchedGroupKeys] = useState<Set<string>>(new Set());
   const [isChecking, setIsChecking] = useState(false);
+  const [mismatchCount, setMismatchCount] = useState(0);
   const hasCompletedRef = useRef(false);
 
   const totalPairs = cards.length / 2;
@@ -32,7 +35,7 @@ export function MemoryGame({ cards, onComplete, disabled = false }: MemoryGamePr
   useEffect(() => {
     if (isRevealed && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
-      onComplete(isComplete);
+      onComplete(isComplete, mismatchCount);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRevealed]);
@@ -51,6 +54,7 @@ export function MemoryGame({ cards, onComplete, disabled = false }: MemoryGamePr
         setMatchedGroupKeys((previous) => new Set(previous).add(cards[firstIndex].groupKey));
         setFlippedIndices([]);
       } else {
+        setMismatchCount((previous) => previous + 1);
         setIsChecking(true);
         setTimeout(() => {
           setFlippedIndices([]);

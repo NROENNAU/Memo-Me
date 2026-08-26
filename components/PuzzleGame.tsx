@@ -12,7 +12,9 @@ import { colors, radius } from '../theme';
 interface PuzzleGameProps {
   photoUri: string;
   gridSize: number;
-  onSolved: () => void;
+  // moveCount = Anzahl der getauschten Teile-Paare bis zur Lösung, Grundlage
+  // für den Versuche-Bonus der Punkteberechnung (siehe PhotoSwipeScreen).
+  onSolved: (moveCount: number) => void;
   // Von außen erzwungenes Sperren (z. B. weil der Timer abgelaufen ist),
   // auch wenn das Puzzle noch nicht gelöst ist.
   disabled?: boolean;
@@ -38,6 +40,7 @@ export function PuzzleGame({ photoUri, gridSize, onSolved, disabled = false }: P
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
   const [containerSize, setContainerSize] = useState(0);
   const [isSolved, setIsSolved] = useState(false);
+  const [moveCount, setMoveCount] = useState(0);
 
   function handleLayout(event: LayoutChangeEvent) {
     setContainerSize(event.nativeEvent.layout.width);
@@ -59,10 +62,12 @@ export function PuzzleGame({ photoUri, gridSize, onSolved, disabled = false }: P
     [nextOrder[selectedPosition], nextOrder[position]] = [nextOrder[position], nextOrder[selectedPosition]];
     setOrder(nextOrder);
     setSelectedPosition(null);
+    const nextMoveCount = moveCount + 1;
+    setMoveCount(nextMoveCount);
 
     if (nextOrder.every((value, index) => value === index)) {
       setIsSolved(true);
-      onSolved();
+      onSolved(nextMoveCount);
     }
   }
 

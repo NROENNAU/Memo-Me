@@ -12,7 +12,9 @@ import { colors, radius, spacing, typography, MIN_TOUCH_TARGET } from '../theme'
 
 interface MatchGameProps {
   pairs: MatchPair[];
-  onComplete: (isCorrect: boolean) => void;
+  // correctionCount = Anzahl der gelösten Verbindungen (Fehltipp-Korrekturen),
+  // Grundlage für den Versuche-Bonus der Punkteberechnung (siehe PhotoSwipeScreen).
+  onComplete: (isCorrect: boolean, correctionCount: number) => void;
   disabled?: boolean;
 }
 
@@ -22,6 +24,7 @@ export function MatchGame({ pairs, onComplete, disabled = false }: MatchGameProp
 
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [selectedPhotoUri, setSelectedPhotoUri] = useState<string | null>(null);
+  const [correctionCount, setCorrectionCount] = useState(0);
   const hasCompletedRef = useRef(false);
 
   const isComplete = Object.keys(assignments).length === pairs.length;
@@ -31,7 +34,7 @@ export function MatchGame({ pairs, onComplete, disabled = false }: MatchGameProp
     if (isRevealed && !hasCompletedRef.current) {
       hasCompletedRef.current = true;
       const isCorrect = pairs.every((pair) => assignments[pair.uri] === pair.name);
-      onComplete(isCorrect);
+      onComplete(isCorrect, correctionCount);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRevealed]);
@@ -41,6 +44,7 @@ export function MatchGame({ pairs, onComplete, disabled = false }: MatchGameProp
     if (assignments[uri]) {
       // Erneutes Antippen einer bereits verbundenen Karte löst die
       // Verbindung wieder - so lässt sich ein Fehltipp korrigieren.
+      setCorrectionCount((previous) => previous + 1);
       setAssignments((previous) => {
         const next = { ...previous };
         delete next[uri];

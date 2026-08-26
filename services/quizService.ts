@@ -378,3 +378,33 @@ export function buildZuordnungQuestion(candidates: ZuordnungCandidate[]): Zuordn
   const pairs = shuffle(uniqueByName).slice(0, ZUORDNUNG_ITEM_COUNT);
   return { pairs };
 }
+
+// Punkte für eine beantwortete Frage: Grundpunkte fürs Richtigliegen, dazu
+// ein Tempo-Bonus (schnell beantwortet = mehr Punkte) und - nur bei Spielen
+// mit mehreren Versuchen wie Puzzle/Pärchen/Zuordnung - ein Bonus dafür, wie
+// nah man am nötigen Minimum an Versuchen lag (extraAttempts = Versuche
+// über dieses Minimum hinaus, bei Einfachauswahl-Fragen immer 0). Eine
+// falsche Antwort gibt unabhängig von Tempo und Versuchen keine Punkte.
+export const BASE_POINTS = 100;
+export const SPEED_BONUS_MAX = 50;
+export const ATTEMPTS_BONUS_MAX = 50;
+const FAST_ANSWER_MS = 3000;
+const SLOW_ANSWER_MS = 20000;
+const PENALTY_PER_EXTRA_ATTEMPT = 10;
+
+export function calculateAnswerPoints(params: {
+  isCorrect: boolean;
+  elapsedMs: number;
+  extraAttempts?: number;
+}): number {
+  if (!params.isCorrect) return 0;
+
+  const clampedElapsed = Math.min(Math.max(params.elapsedMs, 0), SLOW_ANSWER_MS);
+  const speedFactor = 1 - Math.max(0, clampedElapsed - FAST_ANSWER_MS) / (SLOW_ANSWER_MS - FAST_ANSWER_MS);
+  const speedBonus = Math.round(SPEED_BONUS_MAX * speedFactor);
+
+  const extraAttempts = params.extraAttempts ?? 0;
+  const attemptsBonus = Math.max(0, ATTEMPTS_BONUS_MAX - extraAttempts * PENALTY_PER_EXTRA_ATTEMPT);
+
+  return BASE_POINTS + speedBonus + attemptsBonus;
+}

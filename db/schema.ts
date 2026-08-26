@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS QuizErgebnisse (
   foto_id INTEGER NOT NULL REFERENCES Fotos(id), -- Bezug zum abgefragten Foto
   frage_typ TEXT NOT NULL,                       -- 'WANN' | 'WO' | 'WER' | 'ERINNERUNG' | 'PUZZLE' | 'FOTO_AUSWAHL' | 'PAARCHEN' | 'ZUORDNUNG' | 'KARTE'
   richtig_beantwortet INTEGER NOT NULL,          -- 1 = richtig, 0 = falsch (SQLite kennt kein Boolean)
+  punkte INTEGER,                                -- erzielte Punkte (siehe calculateAnswerPoints), NULL bei älteren Einträgen vor Einführung des Punktesystems
   datum INTEGER NOT NULL                         -- Zeitpunkt der Beantwortung (Unix-Millisekunden)
 );
 `;
