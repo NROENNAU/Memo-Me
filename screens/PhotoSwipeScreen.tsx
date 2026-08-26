@@ -36,11 +36,11 @@ import {
   shuffle,
   TimelineItem,
 } from '../services/quizService';
-import { classifyPhoto, hasPersonLabel, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
+import { classifyPhoto, isJunkLabels, isLikelyScreenshot } from '../services/junkPhotoFilter';
 import { matchesDescription, matchesLocation, matchesTags } from '../services/customSourceFilter';
 import { findTargetFacesForDescription, matchesNamedFace, saveNamedFaceEmbedding } from '../services/faceMatchingService';
 import { ImageLabel } from '../modules/image-classifier/src';
-import { DetectedFace } from '../modules/face-recognition/src';
+import { detectFaces, DetectedFace } from '../modules/face-recognition/src';
 import { getNamedFaces, NamedFace } from '../db/faceRepository';
 import { CuriosityQuestion, pickCuriosityQuestion, shouldInterject } from '../services/curiosityService';
 import { upsertPhoto, savePhotoTags, getPhotoTags } from '../db/photoRepository';
@@ -310,12 +310,20 @@ export function PhotoSwipeScreen({ route, navigation }: Props) {
             }
           }
 
+          // Echte Gesichtserkennung statt Szenen-Label-Raten: zuverlässiger
+          // und funktioniert auch bei "Eigene Auswahl"-Treffern, bei denen
+          // die generische Bildklassifikation übersprungen wird (siehe
+          // matchedByMetadata oben). Läuft nur für die tatsächlich
+          // übernommenen Fotos dieser Runde, nicht für den ganzen Pool.
+          const detectedFaces = await detectFaces(photo.uri).catch(() => []);
+          if (!isMountedRef.current) return;
+
           quizPhotos.push({
             photo,
             locationName,
             tags,
             memoryText: memory?.text ?? null,
-            hasPerson: hasPersonLabel(labels),
+            hasPerson: detectedFaces.length > 0,
           });
 
           if (!hasRevealedQuiz) {
