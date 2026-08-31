@@ -8,6 +8,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { PhotoSourceScreen } from './screens/PhotoSourceScreen';
+import { GameSelectionScreen } from './screens/GameSelectionScreen';
+import { MemoryGameScreen } from './screens/MemoryGameScreen';
 import { PhotoSwipeScreen } from './screens/PhotoSwipeScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { usePhotoLibraryPermission } from './hooks/usePhotoLibraryPermission';
@@ -47,6 +49,8 @@ export default function App() {
               // Zugriff erlaubt: direkt zur Fotoquellen-Auswahl, ohne erneutes Onboarding.
               <>
                 <Stack.Screen name="PhotoSource" component={PhotoSourceScreen} />
+                <Stack.Screen name="GameSelection" component={GameSelectionScreen} />
+                <Stack.Screen name="MemoryGame" component={MemoryGameScreen} />
                 <Stack.Screen name="PhotoSwipe" component={PhotoSwipeScreen} />
                 <Stack.Screen name="Settings" component={SettingsScreen} options={{ presentation: 'modal' }} />
               </>

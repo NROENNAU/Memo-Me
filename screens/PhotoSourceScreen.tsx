@@ -3,7 +3,7 @@
 // die Bibliotheks-Ansicht der Apple Fotos-App, aber kompakt gehalten. Nutzt
 // bewusst feste Icons statt echter Vorschaubilder (siehe SourceTile) - die
 // kommen in einem späteren, performanteren Anlauf. Eine Quelle muss aktiv
-// gewählt werden, um ins Quiz zu starten.
+// gewählt werden, danach geht es zur Spielauswahl (GameSelectionScreen).
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,7 +49,7 @@ export function PhotoSourceScreen({ navigation }: Props) {
   }, []);
 
   function selectSource(source: PhotoSource) {
-    navigation.replace('PhotoSwipe', { source });
+    navigation.navigate('GameSelection', { source });
   }
 
   return (
