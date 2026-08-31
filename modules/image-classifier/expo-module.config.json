@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["ImageClassifierModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.imageclassifier.ImageClassifierModule"]
+  }
+}

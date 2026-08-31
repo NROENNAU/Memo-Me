@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["FaceRecognitionModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.facerecognition.FaceRecognitionModule"]
+  }
+}

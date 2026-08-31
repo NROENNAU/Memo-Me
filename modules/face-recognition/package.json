@@ -1,0 +1,9 @@
+{
+  "name": "face-recognition",
+  "version": "0.1.0",
+  "description": "On-device face detection and recognition. iOS uses Apple's Vision framework (face detection + feature-print embeddings) for both detecting and comparing faces, entirely with built-in system APIs, no bundled model. Android currently only detects faces (Google ML Kit) - comparing two faces to see if they're the same person needs a bundled recognition model, which isn't included yet.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "license": "UNLICENSED",
+  "private": true
+}
